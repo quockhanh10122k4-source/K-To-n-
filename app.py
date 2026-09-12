@@ -1,8 +1,8 @@
 import streamlit as st
 
-# =========================
+# ==============================
 # CẤU HÌNH WEBSITE
-# =========================
+# ==============================
 
 st.set_page_config(
     page_title="Kế Toán Tự Động Hóa",
@@ -11,73 +11,50 @@ st.set_page_config(
 )
 
 
-# =========================
-# TÀI KHOẢN TEST
-# =========================
+# ==============================
+# TIÊU ĐỀ
+# ==============================
 
-USERNAME = "admin"
-PASSWORD = "123456"
+st.title("📊 HỆ THỐNG KẾ TOÁN TỰ ĐỘNG HÓA")
 
+st.markdown("---")
 
-# =========================
-# KIỂM TRA ĐĂNG NHẬP
-# =========================
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+st.write(
+    "Hệ thống hỗ trợ quản lý chứng từ, hóa đơn, "
+    "ngân hàng, công nợ và dữ liệu kế toán."
+)
 
 
-# =========================
-# MÀN HÌNH ĐĂNG NHẬP
-# =========================
+# ==============================
+# MENU CHỨC NĂNG
+# ==============================
 
-if not st.session_state.logged_in:
+st.subheader("Các chức năng chính")
 
-    st.title("📊 KẾ TOÁN TỰ ĐỘNG HÓA")
-    st.subheader("Đăng nhập hệ thống")
+col1, col2, col3 = st.columns(3)
 
-    username = st.text_input(
-        "Tên đăng nhập",
-        placeholder="Nhập tên đăng nhập"
-    )
+with col1:
+    st.info("📄\n\n**Chứng từ**\n\nQuản lý chứng từ kế toán.")
 
-    password = st.text_input(
-        "Mật khẩu",
-        type="password",
-        placeholder="Nhập mật khẩu"
-    )
+with col2:
+    st.info("🧾\n\n**Hóa đơn**\n\nTiếp nhận và kiểm tra hóa đơn.")
 
-    if st.button("🔐 Đăng nhập", use_container_width=True):
-
-        if username == USERNAME and password == PASSWORD:
-
-            st.session_state.logged_in = True
-            st.session_state.username = username
-
-            st.rerun()
-
-        else:
-
-            st.error("❌ Tên đăng nhập hoặc mật khẩu không đúng.")
+with col3:
+    st.info("🏦\n\n**Ngân hàng**\n\nNhập và đối soát giao dịch.")
 
 
-# =========================
-# TRANG CHÍNH
-# =========================
+col4, col5, col6 = st.columns(3)
 
-else:
+with col4:
+    st.info("📒\n\n**Công nợ**\n\nTheo dõi phải thu và phải trả.")
 
-    st.title("📊 HỆ THỐNG KẾ TOÁN TỰ ĐỘNG HÓA")
+with col5:
+    st.info("📚\n\n**Hệ thống tài khoản**\n\nQuản lý hệ thống tài khoản kế toán.")
 
-    st.success(
-        f"Đăng nhập thành công! Xin chào {st.session_state.username}."
-    )
+with col6:
+    st.info("📊\n\n**Báo cáo**\n\nTổng hợp và xuất báo cáo.")
 
-    st.write("Chào mừng bạn đến với hệ thống.")
 
-    if st.button("🚪 Đăng xuất"):
+st.markdown("---")
 
-        st.session_state.logged_in = False
-        st.session_state.username = ""
-
-        st.rerun()
+st.success("Hệ thống đã sẵn sàng.")
