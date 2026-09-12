@@ -1,7 +1,7 @@
 import streamlit as st
 
 # ==============================
-# CẤU HÌNH
+# CẤU HÌNH TRANG
 # ==============================
 
 st.set_page_config(
@@ -23,7 +23,7 @@ st.write(
 
 st.markdown("---")
 
-st.subheader("📌 Các chức năng chính")
+st.subheader("📌 CÁC CHỨC NĂNG CHÍNH")
 
 # ==============================
 # HÀNG 1
@@ -33,39 +33,33 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("### 📄 Chứng từ")
-    st.write("Quản lý và tải chứng từ.")
+    st.write("Tải lên và kiểm tra chứng từ kế toán.")
 
-    if st.button(
-        "Mở Chứng từ",
-        key="chung_tu",
+    st.page_link(
+        "pages/1_Chung_tu.py",
+        label="📄 Mở Chứng từ",
         use_container_width=True
-    ):
-        st.switch_page("pages/1_Chung_tu.py")
-
+    )
 
 with col2:
     st.markdown("### 🧾 Hóa đơn")
-    st.write("Đang xây dựng.")
+    st.write("Quản lý và kiểm tra hóa đơn.")
 
     st.button(
-        "Chưa mở",
-        key="hoa_don",
+        "🔒 Chưa mở",
         disabled=True,
         use_container_width=True
     )
-
 
 with col3:
     st.markdown("### 🏦 Ngân hàng")
-    st.write("Đang xây dựng.")
+    st.write("Đối chiếu dữ liệu ngân hàng.")
 
     st.button(
-        "Chưa mở",
-        key="ngan_hang",
+        "🔒 Chưa mở",
         disabled=True,
         use_container_width=True
     )
-
 
 # ==============================
 # HÀNG 2
@@ -75,40 +69,40 @@ col4, col5, col6 = st.columns(3)
 
 with col4:
     st.markdown("### 📒 Công nợ")
-    st.write("Đang xây dựng.")
+    st.write("Theo dõi công nợ phải thu và phải trả.")
 
     st.button(
-        "Chưa mở",
-        key="cong_no",
+        "🔒 Chưa mở",
         disabled=True,
         use_container_width=True
     )
-
 
 with col5:
     st.markdown("### 📚 Hệ thống tài khoản")
-    st.write("Đang xây dựng.")
+    st.write("Quản lý hệ thống tài khoản kế toán.")
 
     st.button(
-        "Chưa mở",
-        key="tai_khoan",
+        "🔒 Chưa mở",
         disabled=True,
         use_container_width=True
     )
-
 
 with col6:
     st.markdown("### 📊 Báo cáo")
-    st.write("Đang xây dựng.")
+    st.write("Tổng hợp và xuất báo cáo kế toán.")
 
     st.button(
-        "Chưa mở",
-        key="bao_cao",
+        "🔒 Chưa mở",
         disabled=True,
         use_container_width=True
     )
 
+# ==============================
+# CUỐI TRANG
+# ==============================
 
 st.markdown("---")
 
-st.info("💡 Chức năng sẽ được mở dần trong quá trình xây dựng.")
+st.info(
+    "💡 Hệ thống đang được xây dựng từng chức năng."
+)
