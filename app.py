@@ -1,148 +1,72 @@
 ```python
 import streamlit as st
 
-# ==============================
-# CẤU HÌNH
-# ==============================
-
 st.set_page_config(
     page_title="Kế Toán Tự Động Hóa",
-    page_icon="📊",
-    layout="wide"
+    page_icon="📊"
 )
-
-# ==============================
-# TIÊU ĐỀ
-# ==============================
 
 st.title("📊 HỆ THỐNG KẾ TOÁN TỰ ĐỘNG HÓA")
 
-st.write(
-    "Hệ thống quản lý và tự động hóa nghiệp vụ kế toán."
-)
+st.write("Hệ thống quản lý kế toán.")
 
 st.markdown("---")
 
-# ==============================
-# CHỨC NĂNG
-# ==============================
+st.header("📌 Chức năng")
 
-st.subheader("📌 CÁC CHỨC NĂNG")
+# Chứng từ
+st.subheader("📄 Chứng từ")
+st.write("Quản lý và tải chứng từ.")
 
-col1, col2, col3 = st.columns(3)
+if st.button("📄 Mở Chứng từ"):
+    st.header("📄 QUẢN LÝ CHỨNG TỪ")
 
-with col1:
-    st.markdown("### 📄 Chứng từ")
-    st.write("Tải và kiểm tra chứng từ.")
+    st.success("🎉 Chứng từ đã mở thành công!")
 
-    if st.button(
-        "📄 Mở Chứng từ",
-        key="chung_tu",
-        use_container_width=True
-    ):
-        st.session_state["trang"] = "chung_tu"
-
-
-with col2:
-    st.markdown("### 🧾 Hóa đơn")
-    st.write("Đang xây dựng.")
-
-    st.button(
-        "🔒 Chưa mở",
-        disabled=True,
-        use_container_width=True
-    )
-
-
-with col3:
-    st.markdown("### 🏦 Ngân hàng")
-    st.write("Đang xây dựng.")
-
-    st.button(
-        "🔒 Chưa mở",
-        disabled=True,
-        use_container_width=True
-    )
-
-
-# ==============================
-# TRANG CHỨNG TỪ
-# ==============================
-
-if st.session_state.get("trang") == "chung_tu":
-
-    st.markdown("---")
-
-    st.title("📄 QUẢN LÝ CHỨNG TỪ")
-
-    st.success(
-        "🎉 Đã mở chức năng Chứng từ thành công!"
-    )
-
-    st.write(
-        "Tại đây bạn có thể tải chứng từ kế toán."
-    )
-
-    st.markdown("---")
-
-    st.subheader("📤 Tải chứng từ")
-
-    uploaded_file = st.file_uploader(
-        "Chọn file chứng từ",
+    file = st.file_uploader(
+        "📤 Chọn chứng từ",
         type=["pdf", "jpg", "jpeg", "png"]
     )
 
-    if uploaded_file is not None:
+    if file is not None:
 
         st.success(
-            f"✅ Đã tải lên: {uploaded_file.name}"
+            "Đã tải lên: " + file.name
         )
 
-        st.markdown("### 📋 Thông tin file")
+        st.write(
+            "Loại file:",
+            file.type
+        )
 
-        col1, col2, col3 = st.columns(3)
+        st.write(
+            "Dung lượng:",
+            round(file.size / 1024, 2),
+            "KB"
+        )
 
-        with col1:
-            st.write("**Tên file**")
-            st.write(uploaded_file.name)
-
-        with col2:
-            st.write("**Loại file**")
-            st.write(uploaded_file.type)
-
-        with col3:
-            st.write("**Dung lượng**")
-            st.write(
-                f"{uploaded_file.size / 1024:.2f} KB"
-            )
-
-        # Hiển thị ảnh
-        if uploaded_file.type.startswith("image/"):
-
-            st.markdown("---")
-
-            st.subheader("👁️ Xem chứng từ")
-
+        if file.type.startswith("image/"):
             st.image(
-                uploaded_file,
+                file,
                 caption="Chứng từ",
                 use_container_width=True
             )
 
-        # PDF
-        elif uploaded_file.type == "application/pdf":
+# Các chức năng khác
+st.markdown("---")
 
-            st.markdown("---")
+st.subheader("🧾 Hóa đơn")
+st.info("Đang xây dựng.")
 
-            st.subheader("📑 Chứng từ PDF")
+st.subheader("🏦 Ngân hàng")
+st.info("Đang xây dựng.")
 
-            st.info(
-                "Đã nhận file PDF thành công."
-            )
+st.subheader("📒 Công nợ")
+st.info("Đang xây dựng.")
 
-    st.markdown("---")
+st.subheader("📚 Hệ thống tài khoản")
+st.info("Đang xây dựng.")
 
-    if st.button("⬅️ Quay về trang chủ"):
-        st.session_state["trang"] = "home"
-        st.rerun()
+st.subheader("📊 Báo cáo")
+st.info("Đang xây dựng.")
 ```
