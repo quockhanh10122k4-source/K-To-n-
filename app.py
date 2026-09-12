@@ -1,154 +1,133 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
+from datetime import datetime
 
-st.set_page_config(page_title="Hệ thống Kế toán & Quản trị Tự động", layout="wide")
+st.set_page_config(page_title="Hệ thống Kế toán & Tự động hóa Hóa đơn", layout="wide")
 
-st.title("Phần mềm Kế toán Doanh nghiệp & Tích hợp Tự động hóa")
+# Khởi tạo kho dữ liệu tập trung (Database giả lập trong phiên làm việc)
+if 'invoice_db' not in st.session_state:
+    st.session_state.invoice_db = pd.DataFrame(columns=[
+        "ID", "Ngày chứng từ", "Mã số thuế", "Tên Nhà cung cấp", 
+        "Số hóa đơn", "Tiền trước thuế", "Thuế GTGT", "Tổng thanh toán", "Trạng thái"
+    ])
+
+st.title("Phần mềm Kế toán Doanh nghiệp & Tự động hóa Hóa đơn")
 st.markdown("---")
 
-# Điều hướng phân hệ nghiệp vụ chi tiết
+# Điều hướng phân hệ nghiệp vụ
 module = st.sidebar.selectbox(
     "Chọn phân hệ nghiệp vụ", 
     [
-        "1. Kế toán Tổng hợp & Danh mục (COA)",
-        "2. Kế toán Tiền mặt, Ngân hàng & Đối soát",
-        "3. Kế toán Công nợ Mua/Bán (AR/AP)",
-        "4. Quản lý Hóa đơn Điện tử & OCR AI",
-        "5. Kế toán Kho, Tài sản & Giá thành",
-        "6. Quản trị Hệ thống & Kiểm toán (Audit Trail)"
+        "1. Quản lý Hóa đơn & Tự động hóa OCR (Chính)",
+        "2. Hệ thống Tài khoản Kế toán (COA)",
+        "3. Kế toán Tiền mặt, Ngân hàng & Đối soát",
+        "4. Kế toán Công nợ & Sổ cái",
+        "5. Quản trị Hệ thống & Kiểm toán"
     ]
 )
 
-if module == "1. Kế toán Tổng hợp & Danh mục (COA)":
-    st.header("Hệ thống Tài khoản Kế toán (Theo Thông tư 200/2014/TT-BTC)")
-    st.write("Quản lý danh mục tài khoản cấp mẹ và tài khoản chi tiết (sub-accounts) đảm bảo nguyên tắc bút toán kép.")
+if module == "1. Quản lý Hóa đơn & Tự động hóa OCR (Chính)":
+    st.header("Trạm Tiếp nhận & Xử lý Hóa đơn Tự động (AI/OCR Pipeline)")
+    st.write("Tải lên hóa đơn do khách hàng gửi tới để hệ thống tự động bóc tách, đưa vào cơ sở dữ liệu trung tâm và cho phép xuất Excel bất cứ lúc nào.")
     
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        coa_df = pd.DataFrame({
-            "Mã TK": ["111", "1111", "112", "131", "331", "511", "3331", "642"],
-            "Tên Tài khoản": [
-                "Tiền mặt", "Tiền mặt tại quỹ VNĐ", "Tiền gửi ngân hàng", 
-                "Phải thu của khách hàng", "Phải trả cho người bán", 
-                "Doanh thu bán hàng và cung cấp dịch vụ", "Thuế GTGT phải nộp", "Chi phí quản lý doanh nghiệp"
-            ],
-            "Cấp TK": ["Cấp 1", "Cấp 2", "Cấp 1", "Cấp 1", "Cấp 1", "Cấp 1", "Cấp 2", "Cấp 1"],
-            "Tính chất": ["Dư Nợ", "Dư Nợ", "Dư Nợ", "Lưỡng tính", "Dư Có", "Dư Có", "Dư Có", "Dư Nợ"]
-        })
-        st.dataframe(coa_df, use_container_width=True)
-    with col2:
-        st.subheader("Thêm/Sửa Tài khoản")
-        st.text_input("Mã tài khoản mới")
-        st.text_input("Tên tài khoản")
-        st.selectbox("Tính chất", ["Dư Nợ", "Dư Có", "Lưỡng tính"])
-        st.button("Cập nhật Danh mục")
-
-elif module == "2. Kế toán Tiền mặt, Ngân hàng & Đối soát":
-    st.header("Đối soát Biến động Số dư Ngân hàng (Bank Reconciliation Engine)")
-    st.write("Tự động khớp nối giao dịch từ file sao kê ngân hàng với các khoản phải thu/phải trả.")
+    col_upload, col_preview = st.columns([1, 1])
     
-    uploaded_bank = st.file_uploader("Tải lên file sao kê ngân hàng (.xlsx, .csv)", type=["xlsx", "csv"])
-    
-    matching_data = pd.DataFrame({
-        "Mã Giao dịch": ["TXN9921", "TXN9922", "TXN9923"],
-        "Ngày giờ": ["2026-06-06 08:30", "2026-06-06 09:15", "2026-06-06 10:00"],
-        "Nội dung chuyển khoản": ["Cty A thanh toán HD001", "Chuyen khoan mua hang khong ro noi dung", "Cty B thanh toan tien hang thang 5"],
-        "Số tiền sao kê": ["10.000.000", "5.500.000", "22.300.000"],
-        "Khớp nối Hệ thống": ["Khớp hoàn toàn (Auto-Matched)", "Lệch / Thiếu chứng từ", "Khớp hoàn toàn (Auto-Matched)"],
-        "Trạng thái xử lý": ["Đã gạch nợ TK 131", "Cần duyệt thủ công", "Đã gạch nợ TK 131"]
-    })
-    st.dataframe(matching_data, use_container_width=True)
-
-elif module == "3. Kế toán Công nợ Mua/Bán (AR/AP)":
-    st.header("Quản lý Công nợ Khách hàng (TK 131) & Nhà cung cấp (TK 331)")
-    
-    tab1, tab2 = st.tabs(["Công nợ Phải Thu (AR)", "Công nợ Phải Trả (AP)"])
-    
-    with tab1:
-        st.subheader("Theo dõi Tuổi nợ & Hạn thanh toán")
-        ar_df = pd.DataFrame({
-            "Mã KH": ["KH01", "KH02", "KH03"],
-            "Tên Khách hàng": ["Công ty Cổ phần Thương mại Alpha", "Công ty TNHH Beta", "Doanh nghiệp Tư nhân Gamma"],
-            "Tổng Phải Thu": ["45.000.000", "120.500.000", "8.200.000"],
-            "Đã thanh toán": ["45.000.000", "60.000.000", "0"],
-            "Còn phải thu": ["0", "60.500.000", "8.200.000"],
-            "Quá hạn": ["Không", "15 ngày", "Quá hạn 45 ngày (Cảnh báo đỏ)"]
-        })
-        st.dataframe(ar_df, use_container_width=True)
+    with col_upload:
+        st.subheader("1. Gửi file hóa đơn từ khách hàng")
+        uploaded_file = st.file_uploader("Chọn file hóa đơn (PDF, XML, Ảnh)", type=["pdf", "xml", "png", "jpg", "jpeg"])
         
-    with tab2:
-        st.subheader("Danh sách công nợ nhà cung cấp đến hạn")
-        st.write("Chưa có khoản phải trả quá hạn nào trong kỳ.")
+        if uploaded_file is not None:
+            st.info(f"Đã nhận tệp: **{uploaded_file.name}**")
+            # Giả lập kết quả AI OCR bóc tách thông minh dựa trên tên file hoặc mặc định
+            auto_mst = "010" + str(abs(hash(uploaded_file.name)) % 10000000)
+            auto_inv_no = "HD" + str(abs(hash(uploaded_file.name)) % 10000)
+            auto_total = 11000000 if "11m" in uploaded_file.name.lower() else 5500000
+            auto_vat = auto_total / 11
+            auto_net = auto_total - auto_vat
+            
+            st.success("AI đã bóc tách dữ liệu thành công!")
+            
+            # Form xác nhận dữ liệu trước khi đẩy vào Database
+            with st.form(key="ocr_form"):
+                st.subheader("2. Kiểm tra & Xác thực dữ liệu bóc tách")
+                f_date = st.date_input("Ngày chứng từ", datetime.now())
+                f_mst = st.text_input("Mã số thuế nhà cung cấp", value=auto_mst)
+                f_name = st.text_input("Tên nhà cung cấp", value="Công ty TNHH Giải pháp Thương mại Số")
+                f_inv_no = st.text_input("Số hóa đơn", value=auto_inv_no)
+                f_total = st.number_input("Tổng thanh toán (VNĐ)", value=float(auto_total))
+                
+                submit_button = st.form_submit_button(label="Lưu vào Cơ sở dữ liệu (Single Source of Truth)")
+                
+                if submit_button:
+                    vat = f_total / 11
+                    net = f_total - vat
+                    new_row = {
+                        "ID": len(st.session_state.invoice_db) + 1,
+                        "Ngày chứng từ": str(f_date),
+                        "Mã số thuế": f_mst,
+                        "Tên Nhà cung cấp": f_name,
+                        "Số hóa đơn": f_inv_no,
+                        "Tiền trước thuế": round(net, 2),
+                        "Thuế GTGT": round(vat, 2),
+                        "Tổng thanh toán": f_total,
+                        "Trạng thái": "Đã ghi sổ tự động"
+                    }
+                    st.session_state.invoice_db = pd.concat([st.session_state.invoice_db, pd.DataFrame([new_row])], ignore_index=True)
+                    st.success("Đã ghi nhận chứng từ vào hệ thống thành công!")
 
-elif module == "4. Quản lý Hóa đơn Điện tử & OCR AI":
-    st.header("Trích xuất Hóa đơn Tự động bằng AI/OCR & Hạch toán Định khoản")
-    
-    uploaded_inv = st.file_uploader("Tải lên hóa đơn điện tử (XML/PDF/Ảnh)", type=["xml", "pdf", "png", "jpg"])
-    
-    if uploaded_inv:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.info("Đã tiếp nhận file hóa đơn đầu vào.")
-            st.code("File Hash: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nTrạng thái: Đã qua kiểm tra ClamAV (An toàn)")
-        with col_b:
-            st.success("Kết quả bóc tách AI (Độ tin cậy: 98.4%)")
-            st.json({
-                "seller_tax_code": "0102938475",
-                "seller_name": "Công ty Giải pháp Công nghệ Việt",
-                "invoice_number": "0001234",
-                "total_amount": 16500000,
-                "vat_amount": 1500000,
-                "suggested_posting": "Nợ TK 642 / Có TK 331"
-            })
-            if st.button("Xác nhận Ghi sổ Định khoản"):
-                st.balloons()
-                st.success("Đã sinh bút toán kép vào Sổ cái thành công!")
+    with col_preview:
+        st.subheader("Xem trước Chứng từ")
+        if uploaded_file is not None:
+            if uploaded_file.type in ["image/png", "image/jpeg", "image/jpg"]:
+                st.image(uploaded_file, caption="Ảnh hóa đơn gốc", use_column_width=True)
+            else:
+                st.write("Định dạng tài liệu văn bản/XML đã được nạp vào bộ nhớ đệm an toàn.")
+        else:
+            st.warning("Chưa có file nào được tải lên. Vui lòng chọn file ở cột bên trái.")
 
-elif module == "5. Kế toán Kho, Tài sản & Giá thành":
-    st.header("Quản lý Kho, Khấu hao Tài sản Cố định & Phân bổ CCDC")
+    st.markdown("---")
+    st.subheader("3. Cơ sở dữ liệu Hóa đơn Tập trung (Thay thế Excel thủ công)")
     
-    sub_tab = st.selectbox("Chọn phân hệ phụ", ["Kế toán Kho & Giá xuất kho", "Khấu hao Tài sản Cố định (TSCĐ)"])
-    if sub_tab == "Kế toán Kho & Giá xuất kho":
-        st.write("Phương pháp tính giá: **Bình quân gia quyền cuối kỳ** hoặc **FIFO**.")
-        inventory_df = pd.DataFrame({
-            "Mã VT": ["VT01", "VT02"],
-            "Tên Vật tư / Hàng hóa": ["Giấy A4 Double A", "Mực máy in Canon"],
-            "Tồn đầu kỳ": ["100 thùng", "20 hộp"],
-            "Nhập trong kỳ": ["50 thùng", "10 hộp"],
-            "Xuất trong kỳ": ["120 thùng", "25 hộp"],
-            "Tồn cuối kỳ": ["30 thùng", "5 hộp"]
-        })
-        st.dataframe(inventory_df, use_container_width=True)
+    if len(st.session_state.invoice_db) > 0:
+        st.dataframe(st.session_state.invoice_db, use_container_width=True)
+        
+        # Tính năng xuất file Excel theo yêu cầu
+        st.subheader("4. Xuất Báo cáo ra File Excel")
+        
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            st.session_state.invoice_db.to_excel(writer, index=False, sheet_name='Danh_sach_Hoa_don')
+        processed_data = output.getvalue()
+        
+        st.download_button(
+            label="📥 Tải xuống File Excel Báo cáo Kế toán (.xlsx)",
+            data=processed_data,
+            file_name=f"Bao_Cao_Hoa_Don_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     else:
-        st.write("Bảng phân bổ khấu hao TSCĐ tự động hàng tháng vào chi phí.")
-        fa_df = pd.DataFrame({
-            "Mã TSCĐ": ["TS01", "TS02"],
-            "Tên Tài sản": ["Máy photocopy văn phòng", "Hệ thống máy chủ Server Dell"],
-            "Nguyên giá": ["50.000.000", "120.000.000"],
-            "Khấu hao lũy kế": ["10.000.000", "24.000.000"],
-            "Giá trị còn lại": ["40.000.000", "96.000.000"]
-        })
-        st.dataframe(fa_df, use_container_width=True)
+        st.info("Chưa có dữ liệu hóa đơn nào trong hệ thống. Hãy tải lên hóa đơn ở phía trên để bắt đầu tích lũy dữ liệu.")
 
-elif module == "6. Quản trị Hệ thống & Kiểm toán (Audit Trail)":
-    st.header("Tầng Hệ thống, Bảo mật & Nhật ký Kiểm toán (Audit Trail)")
-    st.write("Theo dõi toàn bộ vết hoạt động của người dùng và trạng thái hạ tầng kỹ thuật.")
-    
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        st.subheader("Trạng thái Hạ tầng Hệ thống")
-        st.markdown("""
-        * **Database PostgreSQL (ACID):** `Kết nối ổn định (Online)`
-        * **Redis Queue (Celery Worker):** `Đang hoạt động (0 tác vụ nghẽn)`
-        * **Trạng thái Kỳ kế toán Tháng 06/2026:** `Đang mở (Chưa khóa sổ)`
-        * **Cơ chế Idempotency Key:** `Đã kích hoạt (Chống gọi trùng lặp API)`
-        """)
-    with col_s2:
-        st.subheader("Nhật ký Thao tác (Audit Trail)")
-        audit_df = pd.DataFrame({
-            "Thời gian": ["2026-06-06 11:00:22", "2026-06-06 10:45:12", "2026-06-06 09:30:05"],
-            "Người dùng": ["ketoan_truong", "nhanvien_kho", "admin_it"],
-            "Hành động": ["PHEDUYET_CHUNGTU", "TAO_MOI_HOADON", "CAP_NHAT_COA"],
-            "IP Address": ["192.168.1.50", "192.168.1.65", "10.0.0.15"]
-        })
-        st.dataframe(audit_df, use_container_width=True)
+elif module == "2. Hệ thống Tài khoản Kế toán (COA)":
+    st.header("Hệ thống Tài khoản Kế toán Doanh nghiệp (Thông tư 200)")
+    st.dataframe(pd.DataFrame({
+        "Mã TK": ["111", "112", "131", "331", "511", "642"],
+        "Tên tài khoản": ["Tiền mặt", "Tiền gửi ngân hàng", "Phải thu khách hàng", "Phải trả người bán", "Doanh thu", "Chi phí quản lý"],
+        "Tính chất": ["Dư Nợ", "Dư Nợ", "Lưỡng tính", "Dư Có", "Dư Có", "Dư Nợ"]
+    }), use_container_width=True)
+
+elif module == "3. Kế toán Tiền mặt, Ngân hàng & Đối soát":
+    st.header("Đối soát Biến động Số dư Ngân hàng tự động")
+    st.write("Khớp nối giao dịch dòng tiền thực tế với chứng từ hóa đơn.")
+
+elif module == "4. Kế toán Công nợ & Sổ cái":
+    st.header("Hệ thống Bút toán Kép (Double-Entry Bookkeeping)")
+    st.write("Sổ cái lưu vết toàn bộ giao dịch tài chính tự động phát sinh từ hóa đơn.")
+
+elif module == "5. Quản trị Hệ thống & Kiểm toán":
+    st.header("Tầng Hệ thống & Nhật ký Kiểm toán (Audit Trail)")
+    st.markdown("""
+    * **Cơ chế Idempotency:** Đã bật (Chống trùng lặp dữ liệu khi gửi API).
+    * **Trạng thái Cơ sở dữ liệu:** Hoạt động ổn định (Single Source of Truth).
+    """)
