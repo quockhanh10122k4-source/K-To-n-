@@ -1,50 +1,83 @@
 import streamlit as st
 
+# ==============================
+# CẤU HÌNH WEBSITE
+# ==============================
+
 st.set_page_config(
-    page_title="Chứng từ - Kế Toán Tự Động Hóa",
-    page_icon="📄",
+    page_title="Kế Toán Tự Động Hóa",
+    page_icon="📊",
     layout="wide"
 )
 
-st.title("📄 QUẢN LÝ CHỨNG TỪ")
+# ==============================
+# TIÊU ĐỀ
+# ==============================
 
-st.write("Tải chứng từ lên hệ thống để chuẩn bị cho bước kiểm tra và xử lý.")
+st.title("📊 HỆ THỐNG KẾ TOÁN TỰ ĐỘNG HÓA")
+
+st.write(
+    "Hệ thống hỗ trợ quản lý chứng từ, hóa đơn, "
+    "ngân hàng, công nợ và dữ liệu kế toán."
+)
 
 st.markdown("---")
 
 # ==============================
-# TẢI CHỨNG TỪ
+# CÁC CHỨC NĂNG
 # ==============================
 
-st.subheader("📤 Tải chứng từ")
+st.subheader("📌 Các chức năng chính")
 
-uploaded_file = st.file_uploader(
-    "Chọn file chứng từ",
-    type=["pdf", "jpg", "jpeg", "png"],
-    help="Có thể tải lên PDF hoặc hình ảnh chứng từ."
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.page_link(
+        "pages/1_Chung_tu.py",
+        label="📄 Chứng từ",
+        icon="📄"
+    )
+
+with col2:
+    st.button(
+        "🧾 Hóa đơn",
+        disabled=True,
+        use_container_width=True
+    )
+
+with col3:
+    st.button(
+        "🏦 Ngân hàng",
+        disabled=True,
+        use_container_width=True
+    )
+
+
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    st.button(
+        "📒 Công nợ",
+        disabled=True,
+        use_container_width=True
+    )
+
+with col5:
+    st.button(
+        "📚 Hệ thống tài khoản",
+        disabled=True,
+        use_container_width=True
+    )
+
+with col6:
+    st.button(
+        "📊 Báo cáo",
+        disabled=True,
+        use_container_width=True
+    )
+
+st.markdown("---")
+
+st.info(
+    "💡 Các chức năng sẽ được mở dần trong quá trình xây dựng hệ thống."
 )
-
-# ==============================
-# HIỂN THỊ FILE
-# ==============================
-
-if uploaded_file is not None:
-    st.success(f"Đã nhận file: {uploaded_file.name}")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.write("### 📋 Thông tin chứng từ")
-        st.write(f"**Tên file:** {uploaded_file.name}")
-        st.write(f"**Loại file:** {uploaded_file.type}")
-        st.write(f"**Dung lượng:** {uploaded_file.size / 1024:.2f} KB")
-        st.info("Trạng thái: 🟡 Chờ kiểm tra")
-
-    with col2:
-        st.write("### 👁️ Xem chứng từ")
-        if uploaded_file.type.startswith("image/"):
-            st.image(uploaded_file, caption=uploaded_file.name, use_container_width=True)
-        elif uploaded_file.type == "application/pdf":
-            st.info("📄 Đây là file PDF. File đã được tải lên thành công.")
-else:
-    st.info("Chưa có chứng từ. Hãy chọn một file để bắt đầu.")
