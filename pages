@@ -1,1 +1,72 @@
+import streamlit as st
 
+st.set_page_config(
+    page_title="Chứng từ - Kế Toán Tự Động Hóa",
+    page_icon="📄",
+    layout="wide"
+)
+
+st.title("📄 QUẢN LÝ CHỨNG TỪ")
+
+st.write(
+    "Tải chứng từ lên hệ thống để chuẩn bị cho bước kiểm tra và xử lý."
+)
+
+st.markdown("---")
+
+# ==============================
+# TẢI CHỨNG TỪ
+# ==============================
+
+st.subheader("📤 Tải chứng từ")
+
+uploaded_file = st.file_uploader(
+    "Chọn file chứng từ",
+    type=["pdf", "jpg", "jpeg", "png"],
+    help="Có thể tải lên PDF hoặc hình ảnh chứng từ."
+)
+
+# ==============================
+# HIỂN THỊ FILE
+# ==============================
+
+if uploaded_file is not None:
+
+    st.success(f"Đã nhận file: {uploaded_file.name}")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("### 📋 Thông tin chứng từ")
+
+        st.write(f"**Tên file:** {uploaded_file.name}")
+        st.write(f"**Loại file:** {uploaded_file.type}")
+        st.write(
+            f"**Dung lượng:** "
+            f"{uploaded_file.size / 1024:.2f} KB"
+        )
+
+        st.info("Trạng thái: 🟡 Chờ kiểm tra")
+
+    with col2:
+        st.write("### 👁️ Xem chứng từ")
+
+        if uploaded_file.type.startswith("image/"):
+            st.image(
+                uploaded_file,
+                caption=uploaded_file.name,
+                use_container_width=True
+            )
+
+        elif uploaded_file.type == "application/pdf":
+            st.info(
+                "📄 Đây là file PDF. "
+                "File đã được tải lên thành công."
+            )
+
+else:
+
+    st.info(
+        "Chưa có chứng từ. "
+        "Hãy chọn một file để bắt đầu."
+    )
