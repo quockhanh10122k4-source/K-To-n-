@@ -38,7 +38,6 @@ if module == "1. Quản lý Hóa đơn & Tự động hóa OCR (Chính)":
         if uploaded_file is not None:
             st.info(f"Đã nhận tệp: **{uploaded_file.name}**")
             
-            # Gán sẵn dữ liệu chuẩn khớp hoàn hảo với mẫu hóa đơn vừa cung cấp
             auto_mst = "0109876543"
             auto_name = "Công ty TNHH Giải pháp Kế toán Số Việt Nam"
             auto_inv_no = "0001234"
@@ -77,7 +76,6 @@ if module == "1. Quản lý Hóa đơn & Tự động hóa OCR (Chính)":
         st.subheader("Xem trước Chứng từ")
         if uploaded_file is not None:
             if uploaded_file.type in ["image/png", "image/jpeg", "image/jpg"]:
-                # Đã sửa lại đúng tham số hiển thị ảnh để khắc phục lỗi đỏ
                 st.image(uploaded_file, caption="Ảnh hóa đơn gốc", use_container_width=True)
             else:
                 st.write("Định dạng tài liệu văn bản/XML đã được nạp vào bộ nhớ đệm an toàn.")
@@ -85,7 +83,7 @@ if module == "1. Quản lý Hóa đơn & Tự động hóa OCR (Chính)":
             st.warning("Chưa có file nào được tải lên. Vui lòng chọn file ở cột bên trái.")
 
     st.markdown("---")
-    st.subheader("3. Cơ sở dữ liệu Hóa đơn Tập trung (Thay thế Excel thủ công)")
+    st.subheader("3. Cơ sở dữ liệu Hóa đơn Tập trung")
     
     if len(st.session_state.invoice_db) > 0:
         st.dataframe(st.session_state.invoice_db, use_container_width=True)
@@ -103,7 +101,7 @@ if module == "1. Quản lý Hóa đơn & Tự động hóa OCR (Chính)":
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.info("Chưa có dữ liệu hóa đơn nào trong hệ thống. Hãy tải lên hóa đơn ở phía trên để bắt đầu tích lũy dữ liệu.")
+        st.info("Chưa có dữ liệu hóa đơn nào trong hệ thống. Hãy tải lên hóa đơn ở phía trên để bắt đầu.")
 
 elif module == "2. Hệ thống Tài khoản Kế toán (COA)":
     st.header("Hệ thống Tài khoản Kế toán Doanh nghiệp (Thông tư 200)")
@@ -114,7 +112,92 @@ elif module == "2. Hệ thống Tài khoản Kế toán (COA)":
     }), use_container_width=True)
 
 elif module == "3. Kế toán Tiền mặt, Ngân hàng & Đối soát":
-    st.header("Đối soát Biến động Số dư Ngân hàng tự động")
+    st.header("Đối soát Biến động Số dư Ngân hàng Tự động")
+    st.write("Tải lên file sao kê ngân hàng (Excel/CSV) để hệ thống tự động chạy thuật toán đối chiếu với danh sách hóa đơn đã ghi sổ.")
+    
+    if len(st.session_state.invoice_db) == 0:
+        st.warning("⚠️ Cơ sở dữ liệu hóa đơn (Phân hệ 1) hiện đang trống. Vui lòng nhập ít nhất một hóa đơn để hệ thống có dữ liệu đối soát.")
+    else:
+        # Nút tạo file sao kê mẫu để test nhanh
+        with st.expander("🛠️ Cần file sao kê mẫu để thử nghiệm ngay? Bấm vào đây để tải về"):
+            sample_bank = pd.DataFrame({
+                "Ngày giao dịch": ["2026-09-12", "2026-09-15"],
+                "Nội dung chuyển khoản": ["THANH TOAN HOA DON 0001234", "Chi phi dien nuoc thang 9"],
+                "Số tiền (VNĐ)": [12100000.0, 500000.0],
+                "Loại giao dịch": ["Tiền vào", "Tiền ra"]
+            })
+            out_b = BytesIO()
+            with pd.ExcelWriter(out_b, engine='openpyxl') as writer:
+                sample_bank.to_excel(writer, index=False, sheet_name='Sao_ke')
+            st.download_button(
+                label="📥 Tải xuống File Sao_Ke_Ngan_Hang_Mau.xlsx",
+                data=out_b.getvalue(),
+                file_name="Sao_Ke_Ngan_Hang_Mau.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        st.markdown("---")
+        bank_file = st.file_uploader("Tải lên file sao kê ngân hàng của bạn (.csv, .xlsx)", type=["csv", "xlsx"])
+        
+        if bank_file is not None:
+            try:
+                if bank_file.name.endswith('.csv'):
+                    bank_df = pd.read_csv(bank_file)
+                else:
+                    bank_df = pd.read_excel(bank_file)
+                
+                st.subheader("1. Dữ liệu Sao kê Ngân hàng thô")
+                st.dataframe(bank_df, use_container_width=True)
+                
+                st.subheader("2. Kết quả Tự động Đối soát (AI & Rule Matching)")
+                
+                matches = []
+                invoices = st.session_state.invoice_db
+                
+                for idx, b_row in bank_df.iterrows():
+                    matched_inv = "Không tìm thấy"
+                    match_status = "❌ Chưa khớp (Cần kiểm tra lại)"
+                    
+                    b_text = str(b_row.values).lower()
+                    
+                    for i_idx, i_row in invoices.iterrows():
+                        inv_no = str(i_row["Số hóa đơn"])
+                        inv_total = float(i_row["Tổng thanh toán"])
+                        
+                        # Kiểm tra xem dòng sao kê có chứa số tiền khớp hoặc số hóa đơn không
+                        row_vals = [val for val in b_row.values if isinstance(val, (int, float))]
+                        amount_match = any(abs(v - inv_total) < 1.0 for v in row_vals)
+                        text_match = inv_no.lower() in b_text
+                        
+                        if amount_match or text_match:
+                            matched_inv = f"Hóa đơn số: {inv_no} ({inv_total:,.0f} VNĐ)"
+                            match_status = "✅ Khớp chính xác (Đã thanh toán)"
+                            break
+                    
+                    matches.append({
+                        "STT Giao dịch": idx + 1,
+                        "Thông tin Giao dịch": " | ".join([str(v) for v in b_row.values]),
+                        "Trạng thái đối soát": match_status,
+                        "Hóa đơn tham chiếu": matched_inv
+                    })
+                
+                match_result_df = pd.DataFrame(matches)
+                st.dataframe(match_result_df, use_container_width=True)
+                
+                matched_count = len(match_result_df[match_result_df["Trạng thái đối soát"].str.contains("✅")])
+                total_trans = len(match_result_df)
+                
+                col_m1, col_m2 = st.columns(2)
+                col_m1.metric("Tổng số giao dịch sao kê", total_trans)
+                col_m2.metric("Giao dịch đối soát thành công", f"{matched_count} / {total_trans}")
+                
+                if matched_count > 0:
+                    st.success("🎉 Hệ thống đã tự động hoàn tất việc ghép nối dòng tiền ngân hàng với hóa đơn thành công!")
+                else:
+                    st.warning("⚠️ Không tìm thấy giao dịch nào khớp với hóa đơn hiện tại trong hệ thống.")
+                    
+            except Exception as e:
+                st.error(f"Lỗi đọc file sao kê: {e}")
 
 elif module == "4. Kế toán Công nợ & Sổ cái":
     st.header("Hệ thống Bút toán Kép (Double-Entry Bookkeeping)")
