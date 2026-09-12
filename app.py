@@ -1,7 +1,8 @@
+```python
 import streamlit as st
 
 # ==============================
-# CẤU HÌNH TRANG
+# CẤU HÌNH
 # ==============================
 
 st.set_page_config(
@@ -17,43 +18,45 @@ st.set_page_config(
 st.title("📊 HỆ THỐNG KẾ TOÁN TỰ ĐỘNG HÓA")
 
 st.write(
-    "Hệ thống hỗ trợ quản lý chứng từ, hóa đơn, "
-    "ngân hàng, công nợ và dữ liệu kế toán."
+    "Hệ thống quản lý và tự động hóa nghiệp vụ kế toán."
 )
 
 st.markdown("---")
 
-st.subheader("📌 CÁC CHỨC NĂNG CHÍNH")
+# ==============================
+# CHỨC NĂNG
+# ==============================
 
-# ==============================
-# HÀNG 1
-# ==============================
+st.subheader("📌 CÁC CHỨC NĂNG")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("### 📄 Chứng từ")
-    st.write("Tải lên và kiểm tra chứng từ kế toán.")
+    st.write("Tải và kiểm tra chứng từ.")
 
-    st.page_link(
-        "pages/1_Chung_tu.py",
-        label="📄 Mở Chứng từ",
+    if st.button(
+        "📄 Mở Chứng từ",
+        key="chung_tu",
         use_container_width=True
-    )
+    ):
+        st.session_state["trang"] = "chung_tu"
+
 
 with col2:
     st.markdown("### 🧾 Hóa đơn")
-    st.write("Quản lý và kiểm tra hóa đơn.")
+    st.write("Đang xây dựng.")
 
     st.button(
         "🔒 Chưa mở",
         disabled=True,
         use_container_width=True
     )
+
 
 with col3:
     st.markdown("### 🏦 Ngân hàng")
-    st.write("Đối chiếu dữ liệu ngân hàng.")
+    st.write("Đang xây dựng.")
 
     st.button(
         "🔒 Chưa mở",
@@ -61,48 +64,85 @@ with col3:
         use_container_width=True
     )
 
+
 # ==============================
-# HÀNG 2
+# TRANG CHỨNG TỪ
 # ==============================
 
-col4, col5, col6 = st.columns(3)
+if st.session_state.get("trang") == "chung_tu":
 
-with col4:
-    st.markdown("### 📒 Công nợ")
-    st.write("Theo dõi công nợ phải thu và phải trả.")
+    st.markdown("---")
 
-    st.button(
-        "🔒 Chưa mở",
-        disabled=True,
-        use_container_width=True
+    st.title("📄 QUẢN LÝ CHỨNG TỪ")
+
+    st.success(
+        "🎉 Đã mở chức năng Chứng từ thành công!"
     )
 
-with col5:
-    st.markdown("### 📚 Hệ thống tài khoản")
-    st.write("Quản lý hệ thống tài khoản kế toán.")
-
-    st.button(
-        "🔒 Chưa mở",
-        disabled=True,
-        use_container_width=True
+    st.write(
+        "Tại đây bạn có thể tải chứng từ kế toán."
     )
 
-with col6:
-    st.markdown("### 📊 Báo cáo")
-    st.write("Tổng hợp và xuất báo cáo kế toán.")
+    st.markdown("---")
 
-    st.button(
-        "🔒 Chưa mở",
-        disabled=True,
-        use_container_width=True
+    st.subheader("📤 Tải chứng từ")
+
+    uploaded_file = st.file_uploader(
+        "Chọn file chứng từ",
+        type=["pdf", "jpg", "jpeg", "png"]
     )
 
-# ==============================
-# CUỐI TRANG
-# ==============================
+    if uploaded_file is not None:
 
-st.markdown("---")
+        st.success(
+            f"✅ Đã tải lên: {uploaded_file.name}"
+        )
 
-st.info(
-    "💡 Hệ thống đang được xây dựng từng chức năng."
-)
+        st.markdown("### 📋 Thông tin file")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.write("**Tên file**")
+            st.write(uploaded_file.name)
+
+        with col2:
+            st.write("**Loại file**")
+            st.write(uploaded_file.type)
+
+        with col3:
+            st.write("**Dung lượng**")
+            st.write(
+                f"{uploaded_file.size / 1024:.2f} KB"
+            )
+
+        # Hiển thị ảnh
+        if uploaded_file.type.startswith("image/"):
+
+            st.markdown("---")
+
+            st.subheader("👁️ Xem chứng từ")
+
+            st.image(
+                uploaded_file,
+                caption="Chứng từ",
+                use_container_width=True
+            )
+
+        # PDF
+        elif uploaded_file.type == "application/pdf":
+
+            st.markdown("---")
+
+            st.subheader("📑 Chứng từ PDF")
+
+            st.info(
+                "Đã nhận file PDF thành công."
+            )
+
+    st.markdown("---")
+
+    if st.button("⬅️ Quay về trang chủ"):
+        st.session_state["trang"] = "home"
+        st.rerun()
+```
