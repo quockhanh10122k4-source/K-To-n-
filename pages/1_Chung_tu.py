@@ -6,7 +6,7 @@ import re
 import numpy as np
 import fitz
 
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 
 # =========================================================
@@ -22,7 +22,8 @@ st.set_page_config(
 st.title("📄 QUẢN LÝ CHỨNG TỪ")
 
 st.write(
-    "Tải chứng từ gốc → đọc OCR → kiểm tra dữ liệu → xuất Excel"
+    "Tải chứng từ gốc → xử lý ảnh → OCR nhiều bước → "
+    "phân tích dữ liệu → kiểm tra → xuất Excel"
 )
 
 
@@ -38,7 +39,7 @@ if "selected_document" not in st.session_state:
 
 
 # =========================================================
-# KHỞI TẠO OCR
+# OCR
 # =========================================================
 
 @st.cache_resource
@@ -51,6 +52,41 @@ def load_ocr():
     )
 
     return reader
+
+
+# =========================================================
+# TIỀN XỬ LÝ ẢNH
+# =========================================================
+
+def preprocess_image(image):
+    """
+    Tăng chất lượng ảnh trước khi OCR.
+    """
+
+    image = image.convert("RGB")
+
+    # Tăng kích thước
+    width, height = image.size
+
+    scale = 2
+
+    image = image.resize(
+        (width * scale, height * scale),
+        Image.Resampling.LANCZOS
+    )
+
+    # Tăng tương phản
+    image = ImageEnhance.Contrast(image).enhance(1.5)
+
+    # Tăng độ nét
+    image = ImageEnhance.Sharpness(image).enhance(1.5)
+
+    # Khử nhiễu nhẹ
+    image = image.filter(
+        ImageFilter.MedianFilter(size=3)
+    )
+
+    return image
 
 
 # =========================================================
@@ -69,7 +105,7 @@ def pdf_to_images(file_bytes):
     for page in pdf:
 
         pix = page.get_pixmap(
-            matrix=fitz.Matrix(2, 2),
+            matrix=fitz.Matrix(3, 3),
             alpha=False
         )
 
@@ -87,32 +123,220 @@ def pdf_to_images(file_bytes):
 
 
 # =========================================================
-# OCR ẢNH
+# OCR CHI TIẾT
 # =========================================================
 
-def read_image(reader, image):
+def read_image_detail(reader, image):
 
-    # PIL Image -> NumPy
     image_array = np.array(image)
 
     result = reader.readtext(
         image_array,
         detail=1,
-        paragraph=False
+        paragraph=False,
+        text_threshold=0.4,
+        low_text=0.2,
+        link_threshold=0.2,
+        mag_ratio=1.5
     )
 
-    lines = []
+    data = []
 
     for item in result:
 
-        if len(item) >= 2:
+        if len(item) < 3:
+            continue
 
-            text = str(item[1]).strip()
+        box = item[0]
+        text = str(item[1]).strip()
+        confidence = float(item[2])
 
-            if text:
-                lines.append(text)
+        if not text:
+            continue
+
+        xs = [point[0] for point in box]
+        ys = [point[1] for point in box]
+
+        x1 = min(xs)
+        y1 = min(ys)
+        x2 = max(xs)
+        y2 = max(ys)
+
+        data.append({
+            "text": text,
+            "confidence": confidence,
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+            "center_x": (x1 + x2) / 2,
+            "center_y": (y1 + y2) / 2
+        })
+
+    return data
+
+
+# =========================================================
+# SẮP XẾP OCR THEO DÒNG
+# =========================================================
+
+def sort_ocr_data(data):
+
+    if not data:
+        return []
+
+    data = sorted(
+        data,
+        key=lambda x: (
+            round(x["center_y"] / 15),
+            x["x1"]
+        )
+    )
+
+    return data
+
+
+# =========================================================
+# GHÉP OCR THÀNH TEXT
+# =========================================================
+
+def ocr_data_to_text(data):
+
+    if not data:
+        return ""
+
+    data = sort_ocr_data(data)
+
+    lines = []
+
+    current_line = []
+
+    current_y = None
+
+    for item in data:
+
+        y = item["center_y"]
+
+        if current_y is None:
+
+            current_line = [item]
+            current_y = y
+
+        elif abs(y - current_y) <= 25:
+
+            current_line.append(item)
+
+        else:
+
+            current_line = sorted(
+                current_line,
+                key=lambda x: x["x1"]
+            )
+
+            lines.append(
+                " ".join(
+                    x["text"]
+                    for x in current_line
+                )
+            )
+
+            current_line = [item]
+            current_y = y
+
+    if current_line:
+
+        current_line = sorted(
+            current_line,
+            key=lambda x: x["x1"]
+        )
+
+        lines.append(
+            " ".join(
+                x["text"]
+                for x in current_line
+            )
+        )
 
     return "\n".join(lines)
+
+
+# =========================================================
+# OCR NHIỀU LẦN
+# =========================================================
+
+def multi_ocr(reader, image):
+
+    processed = preprocess_image(image)
+
+    data_1 = read_image_detail(
+        reader,
+        processed
+    )
+
+    # OCR ảnh gốc + ảnh xử lý
+    data_2 = read_image_detail(
+        reader,
+        image
+    )
+
+    combined = data_1 + data_2
+
+    # Loại text trùng
+    unique = {}
+
+    for item in combined:
+
+        key = (
+            item["text"].lower().strip(),
+            round(item["center_x"] / 20),
+            round(item["center_y"] / 20)
+        )
+
+        if key not in unique:
+
+            unique[key] = item
+
+        else:
+
+            # Giữ confidence cao hơn
+            if item["confidence"] > unique[key]["confidence"]:
+
+                unique[key] = item
+
+    data = list(unique.values())
+
+    data = sort_ocr_data(data)
+
+    text = ocr_data_to_text(data)
+
+    return {
+        "data": data,
+        "text": text,
+        "processed_image": processed
+    }
+
+
+# =========================================================
+# CHUẨN HÓA TEXT
+# =========================================================
+
+def normalize_text(text):
+
+    if not text:
+        return ""
+
+    text = text.replace(
+        "\xa0",
+        " "
+    )
+
+    text = re.sub(
+        r"[ \t]+",
+        " ",
+        text
+    )
+
+    return text.strip()
 
 
 # =========================================================
@@ -123,11 +347,11 @@ def extract_date(text):
 
     patterns = [
 
-        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b",
+        r"\b([0-3]?\d)[/\-.]([0-1]?\d)[/\-.](20\d{2})\b",
 
-        r"Ngày\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"Ngày\s*[:\-]?\s*([0-3]?\d[/\-.][0-1]?\d[/\-.]20\d{2})",
 
-        r"Date\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4})"
+        r"Date\s*[:\-]?\s*([0-3]?\d[/\-.][0-1]?\d[/\-.]20\d{2})"
 
     ]
 
@@ -141,10 +365,15 @@ def extract_date(text):
 
         if match:
 
-            if match.lastindex:
-                return match.group(1)
+            if match.lastindex == 3:
 
-            return match.group(0)
+                return (
+                    f"{match.group(1)}/"
+                    f"{match.group(2)}/"
+                    f"{match.group(3)}"
+                )
+
+            return match.group(1)
 
     return ""
 
@@ -157,41 +386,58 @@ def extract_tax_code(text):
 
     patterns = [
 
-        r"MST\s*[:\-]?\s*(\d{10,14})",
+        r"(?:MST|Mã số thuế|Tax Code)"
+        r"\s*[:\-]?\s*"
+        r"(\d{10}(?:-\d{3})?)",
 
-        r"Mã số thuế\s*[:\-]?\s*(\d{10,14})",
+        r"\b(\d{10}-\d{3})\b",
 
-        r"Tax Code\s*[:\-]?\s*(\d{10,14})"
+        r"\b(\d{10})\b"
 
     ]
 
     for pattern in patterns:
 
-        match = re.search(
+        matches = re.findall(
             pattern,
             text,
             re.IGNORECASE
         )
 
-        if match:
-            return match.group(1)
+        if matches:
+
+            for value in matches:
+
+                value = value.replace(
+                    " ",
+                    ""
+                )
+
+                if len(
+                    re.sub(r"\D", "", value)
+                ) in [10, 13]:
+
+                    return value
 
     return ""
 
 
 # =========================================================
-# TÌM SỐ CHỨNG TỪ / SỐ HÓA ĐƠN
+# TÌM SỐ HÓA ĐƠN
 # =========================================================
 
 def extract_document_number(text):
 
     patterns = [
 
-        r"Số\s*[:\-]?\s*([A-Z0-9\/\-]+)",
+        r"Số hóa đơn\s*[:\-]?\s*([A-Z0-9\/\-.]+)",
 
-        r"No\.\s*[:\-]?\s*([A-Z0-9\/\-]+)",
+        r"Số\s*[:\-]\s*([A-Z0-9\/\-.]+)",
 
-        r"Số hóa đơn\s*[:\-]?\s*([A-Z0-9\/\-]+)"
+        r"No\.\s*[:\-]?\s*([A-Z0-9\/\-.]+)",
+
+        r"Invoice\s*(?:No|Number)"
+        r"\s*[:\-]?\s*([A-Z0-9\/\-.]+)"
 
     ]
 
@@ -204,26 +450,136 @@ def extract_document_number(text):
         )
 
         if match:
-            return match.group(1)
+
+            value = match.group(1).strip()
+
+            if value:
+
+                return value
 
     return ""
 
 
 # =========================================================
-# TÌM TỔNG TIỀN
+# CHUYỂN TIỀN VỀ SỐ
 # =========================================================
 
-def extract_total(text):
+def parse_money(value):
+
+    if not value:
+        return None
+
+    value = str(value)
+
+    value = value.replace(
+        " ",
+        ""
+    )
+
+    value = re.sub(
+        r"[^\d.,]",
+        "",
+        value
+    )
+
+    if not value:
+        return None
+
+    # Việt Nam:
+    # 110.000.000
+    # 10,000,000
+    if "." in value and "," in value:
+
+        if value.rfind(".") > value.rfind(","):
+
+            value = value.replace(
+                ",",
+                ""
+            )
+
+        else:
+
+            value = value.replace(
+                ".",
+                ""
+            )
+
+            value = value.replace(
+                ",",
+                "."
+            )
+
+    elif "." in value:
+
+        parts = value.split(".")
+
+        if all(
+            len(part) == 3
+            for part in parts[1:]
+        ):
+
+            value = "".join(parts)
+
+    elif "," in value:
+
+        parts = value.split(",")
+
+        if all(
+            len(part) == 3
+            for part in parts[1:]
+        ):
+
+            value = "".join(parts)
+
+    try:
+
+        return float(value)
+
+    except:
+
+        return None
+
+
+# =========================================================
+# FORMAT TIỀN
+# =========================================================
+
+def format_money(value):
+
+    if value is None:
+        return ""
+
+    try:
+
+        return f"{value:,.0f}".replace(
+            ",",
+            "."
+        )
+
+    except:
+
+        return str(value)
+
+
+# =========================================================
+# TÌM TIỀN HÀNG
+# =========================================================
+
+def extract_subtotal(text):
 
     patterns = [
 
-        r"Tổng tiền thanh toán\s*[:\-]?\s*([\d\.,]+)",
+        r"Cộng tiền hàng\s*[:\-]?\s*([\d\.,]+)",
 
-        r"Tổng cộng tiền thanh toán\s*[:\-]?\s*([\d\.,]+)",
+        r"Tiền hàng\s*[:\-]?\s*([\d\.,]+)",
 
-        r"Tổng cộng\s*[:\-]?\s*([\d\.,]+)",
+        r"Tiền trước thuế\s*[:\-]?\s*([\d\.,]+)",
 
-        r"Total\s*[:\-]?\s*([\d\.,]+)"
+        r"Giá trị hàng hóa\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Subtotal\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Amount before tax\s*[:\-]?\s*([\d\.,]+)"
 
     ]
 
@@ -236,6 +592,7 @@ def extract_total(text):
         )
 
         if match:
+
             return match.group(1)
 
     return ""
@@ -251,9 +608,14 @@ def extract_vat(text):
 
         r"Tiền thuế GTGT\s*[:\-]?\s*([\d\.,]+)",
 
+        r"Tiền thuế GTGT\s*[\s\S]{0,100}?"
+        r"([\d\.,]+)",
+
         r"Tiền thuế\s*[:\-]?\s*([\d\.,]+)",
 
-        r"VAT\s*[:\-]?\s*([\d\.,]+)"
+        r"VAT\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Tax amount\s*[:\-]?\s*([\d\.,]+)"
 
     ]
 
@@ -266,7 +628,89 @@ def extract_vat(text):
         )
 
         if match:
+
             return match.group(1)
+
+    return ""
+
+
+# =========================================================
+# TÌM THUẾ SUẤT
+# =========================================================
+
+def extract_vat_rate(text):
+
+    patterns = [
+
+        r"Thuế suất\s*[:\-]?\s*(\d{1,2}(?:[.,]\d+)?)\s*%",
+
+        r"GTGT\s*[:\-]?\s*(\d{1,2}(?:[.,]\d+)?)\s*%",
+
+        r"VAT\s*[:\-]?\s*(\d{1,2}(?:[.,]\d+)?)\s*%",
+
+        r"\b(0|5|8|10)\s*%"
+
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
+
+        if match:
+
+            return match.group(1) + "%"
+
+    return ""
+
+
+# =========================================================
+# TÌM TỔNG TIỀN
+# =========================================================
+
+def extract_total(text):
+
+    patterns = [
+
+        r"Tổng tiền thanh toán"
+        r"\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Tổng cộng tiền thanh toán"
+        r"\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Tổng cộng"
+        r"\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Thành tiền"
+        r"\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Total"
+        r"\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Grand Total"
+        r"\s*[:\-]?\s*([\d\.,]+)"
+
+    ]
+
+    for pattern in patterns:
+
+        matches = re.findall(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
+
+        if matches:
+
+            # Lấy số cuối cùng có ý nghĩa
+            for value in reversed(matches):
+
+                if parse_money(value) is not None:
+
+                    return value
 
     return ""
 
@@ -277,30 +721,266 @@ def extract_vat(text):
 
 def extract_seller(text):
 
-    lines = text.splitlines()
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
+
+    keywords = [
+        "người bán",
+        "đơn vị bán",
+        "tên đơn vị",
+        "tên người bán",
+        "seller",
+        "company"
+    ]
 
     for i, line in enumerate(lines):
 
-        clean = line.strip()
+        lower = line.lower()
+
+        for keyword in keywords:
+
+            if keyword in lower:
+
+                # Trường hợp:
+                # Người bán: CÔNG TY ABC
+                parts = re.split(
+                    r"[:\-]",
+                    line,
+                    maxsplit=1
+                )
+
+                if len(parts) == 2:
+
+                    value = parts[1].strip()
+
+                    if len(value) > 3:
+
+                        return value
+
+                # Trường hợp dòng sau
+                if i + 1 < len(lines):
+
+                    value = lines[i + 1]
+
+                    if len(value) > 3:
+
+                        return value
+
+    # Phương án dự phòng:
+    # tìm dòng có CÔNG TY
+    for line in lines:
+
+        upper = line.upper()
 
         if (
-            "Người bán" in clean
-            or "NGƯỜI BÁN" in clean
+            "CÔNG TY" in upper
+            or "CTY" in upper
+            or "COMPANY" in upper
         ):
 
-            # Lấy dòng tiếp theo
-            if i + 1 < len(lines):
-
-                next_line = lines[i + 1].strip()
-
-                if next_line:
-                    return next_line
+            return line
 
     return ""
 
 
 # =========================================================
-# TẠO DỮ LIỆU CHỨNG TỪ
+# TÌM NỘI DUNG HÀNG HÓA
+# =========================================================
+
+def extract_content(text):
+
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
+
+    keywords = [
+        "tên hàng",
+        "tên hàng hóa",
+        "hàng hóa",
+        "dịch vụ",
+        "description"
+    ]
+
+    for i, line in enumerate(lines):
+
+        lower = line.lower()
+
+        for keyword in keywords:
+
+            if keyword in lower:
+
+                if i + 1 < len(lines):
+
+                    next_line = lines[i + 1]
+
+                    # Không lấy dòng tổng tiền
+                    if not re.search(
+                        r"tổng|vat|thuế",
+                        next_line,
+                        re.IGNORECASE
+                    ):
+
+                        return next_line
+
+    return ""
+
+
+# =========================================================
+# KIỂM TRA LOGIC
+# =========================================================
+
+def validate_record(record):
+
+    warnings = []
+
+    subtotal = parse_money(
+        record["Tiền hàng"]
+    )
+
+    vat = parse_money(
+        record["Tiền VAT"]
+    )
+
+    total = parse_money(
+        record["Tổng tiền"]
+    )
+
+    rate_text = record[
+        "Thuế suất VAT"
+    ]
+
+    rate = None
+
+    if rate_text:
+
+        try:
+
+            rate = float(
+                rate_text.replace(
+                    "%",
+                    ""
+                ).replace(
+                    ",",
+                    "."
+                )
+            )
+
+        except:
+
+            pass
+
+    # =========================================
+    # KIỂM TRA THIẾU
+    # =========================================
+
+    required = {
+
+        "Ngày chứng từ":
+            record["Ngày chứng từ"],
+
+        "Số chứng từ":
+            record["Số chứng từ"],
+
+        "Mã số thuế":
+            record["Mã số thuế"],
+
+        "Người bán":
+            record["Người bán"],
+
+        "Tổng tiền":
+            record["Tổng tiền"]
+
+    }
+
+    missing = []
+
+    for field, value in required.items():
+
+        if not value:
+
+            missing.append(field)
+
+    if missing:
+
+        warnings.append(
+            "Thiếu: " +
+            ", ".join(missing)
+        )
+
+    # =========================================
+    # KIỂM TRA VAT
+    # =========================================
+
+    if (
+        subtotal is not None
+        and vat is not None
+        and rate is not None
+    ):
+
+        expected_vat = subtotal * rate / 100
+
+        tolerance = max(
+            1,
+            abs(expected_vat) * 0.01
+        )
+
+        if abs(
+            expected_vat - vat
+        ) > tolerance:
+
+            warnings.append(
+                "VAT không khớp tiền hàng × thuế suất"
+            )
+
+    # =========================================
+    # KIỂM TRA TỔNG
+    # =========================================
+
+    if (
+        subtotal is not None
+        and vat is not None
+        and total is not None
+    ):
+
+        expected_total = (
+            subtotal + vat
+        )
+
+        tolerance = max(
+            1,
+            abs(expected_total) * 0.01
+        )
+
+        if abs(
+            expected_total - total
+        ) > tolerance:
+
+            warnings.append(
+                "Tổng tiền không khớp tiền hàng + VAT"
+            )
+
+    # =========================================
+    # TRẠNG THÁI
+    # =========================================
+
+    if not warnings:
+
+        status = "🟢 Có vẻ hợp lệ"
+
+    else:
+
+        status = "🟡 Cần kiểm tra"
+
+    return status, warnings
+
+
+# =========================================================
+# TẠO RECORD
 # =========================================================
 
 def create_record(
@@ -311,13 +991,15 @@ def create_record(
     preview_image
 ):
 
-    return {
+    record = {
 
         "STT": 0,
 
-        "Tên file": file_name,
+        "Tên file":
+            file_name,
 
-        "Loại file": file_type,
+        "Loại file":
+            file_type,
 
         "Ngày chứng từ":
             extract_date(raw_text),
@@ -331,9 +1013,11 @@ def create_record(
         "Người bán":
             extract_seller(raw_text),
 
-        "Tiền hàng": "",
+        "Tiền hàng":
+            extract_subtotal(raw_text),
 
-        "Thuế suất VAT": "",
+        "Thuế suất VAT":
+            extract_vat_rate(raw_text),
 
         "Tiền VAT":
             extract_vat(raw_text),
@@ -341,10 +1025,14 @@ def create_record(
         "Tổng tiền":
             extract_total(raw_text),
 
-        "Nội dung": "",
+        "Nội dung":
+            extract_content(raw_text),
 
         "Trạng thái":
             "⚠️ Chưa kiểm tra",
+
+        "Cảnh báo":
+            [],
 
         "_raw_text":
             raw_text,
@@ -354,7 +1042,24 @@ def create_record(
 
         "_preview_image":
             preview_image
+
     }
+
+    status, warnings = validate_record(
+        record
+    )
+
+    record["Cảnh báo"] = warnings
+
+    if warnings:
+
+        record["Trạng thái"] = status
+
+    else:
+
+        record["Trạng thái"] = status
+
+    return record
 
 
 # =========================================================
@@ -363,7 +1068,9 @@ def create_record(
 
 st.markdown("---")
 
-st.subheader("1️⃣ TẢI CHỨNG TỪ GỐC")
+st.subheader(
+    "1️⃣ TẢI CHỨNG TỪ GỐC"
+)
 
 uploaded_files = st.file_uploader(
 
@@ -379,10 +1086,6 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-
-# =========================================================
-# HIỂN THỊ FILE ĐÃ CHỌN
-# =========================================================
 
 if uploaded_files:
 
@@ -407,22 +1110,17 @@ if uploaded_files:
     st.markdown("---")
 
     if st.button(
-        "🔍 ĐỌC & GHI DỮ LIỆU CHỨNG TỪ",
+        "🔍 ĐỌC & PHÂN TÍCH CHỨNG TỪ",
         type="primary",
         use_container_width=True
     ):
 
-        # Xóa kết quả cũ
         st.session_state.documents = []
-
-        # ---------------------------------------------
-        # KHỞI ĐỘNG OCR
-        # ---------------------------------------------
 
         try:
 
             with st.spinner(
-                "⏳ Đang khởi động hệ thống OCR..."
+                "⏳ Đang khởi động OCR..."
             ):
 
                 reader = load_ocr()
@@ -437,31 +1135,24 @@ if uploaded_files:
 
             st.stop()
 
-
-        # ---------------------------------------------
-        # TIẾN TRÌNH
-        # ---------------------------------------------
-
         progress = st.progress(0)
 
         status_box = st.empty()
 
-        total = len(uploaded_files)
+        total_files = len(
+            uploaded_files
+        )
 
-
-        # ---------------------------------------------
-        # ĐỌC TỪNG FILE
-        # ---------------------------------------------
-
-        for index, uploaded_file in enumerate(
+        for file_index, uploaded_file in enumerate(
             uploaded_files
         ):
 
             file_name = uploaded_file.name
 
             status_box.info(
-                f"🔍 Đang đọc "
-                f"{index + 1}/{total}: {file_name}"
+                f"🔍 Đang xử lý "
+                f"{file_index + 1}/{total_files}: "
+                f"{file_name}"
             )
 
             try:
@@ -470,24 +1161,21 @@ if uploaded_files:
 
                 file_type = uploaded_file.type
 
+                pages = []
 
                 # =====================================
                 # ẢNH
                 # =====================================
 
-                if file_type.startswith("image/"):
+                if file_type.startswith(
+                    "image/"
+                ):
 
                     image = Image.open(
                         io.BytesIO(file_bytes)
                     ).convert("RGB")
 
-                    raw_text = read_image(
-                        reader,
-                        image
-                    )
-
-                    preview_image = image
-
+                    pages.append(image)
 
                 # =====================================
                 # PDF
@@ -495,47 +1183,64 @@ if uploaded_files:
 
                 elif file_type == "application/pdf":
 
-                    images = pdf_to_images(
+                    pages = pdf_to_images(
                         file_bytes
                     )
 
-                    all_text = []
-
-                    for page_number, image in enumerate(
-                        images
-                    ):
-
-                        page_text = read_image(
-                            reader,
-                            image
-                        )
-
-                        if page_text:
-
-                            all_text.append(
-                                f"--- Trang {page_number + 1} ---\n"
-                                f"{page_text}"
-                            )
-
-                    raw_text = "\n\n".join(
-                        all_text
-                    )
-
-                    if images:
-
-                        preview_image = images[0]
-
-                    else:
-
-                        preview_image = None
-
-
                 else:
 
-                    raw_text = ""
+                    raise ValueError(
+                        "Định dạng file không được hỗ trợ."
+                    )
 
-                    preview_image = None
+                all_page_text = []
 
+                preview_image = (
+                    pages[0]
+                    if pages
+                    else None
+                )
+
+                # =====================================
+                # OCR TỪNG TRANG
+                # =====================================
+
+                for page_number, image in enumerate(
+                    pages
+                ):
+
+                    status_box.info(
+                        f"🔍 {file_name} "
+                        f"→ đang đọc trang "
+                        f"{page_number + 1}/{len(pages)}"
+                    )
+
+                    ocr_result = multi_ocr(
+                        reader,
+                        image
+                    )
+
+                    page_text = ocr_result[
+                        "text"
+                    ]
+
+                    if page_text:
+
+                        all_page_text.append(
+
+                            f"========== TRANG "
+                            f"{page_number + 1} ==========\n"
+                            f"{page_text}"
+
+                        )
+
+                raw_text = "\n\n".join(
+                    all_page_text
+                )
+
+                raw_text = normalize_text(
+                    raw_text
+                )
 
                 # =====================================
                 # TẠO RECORD
@@ -552,19 +1257,16 @@ if uploaded_files:
                     file_bytes,
 
                     preview_image
+
                 )
 
-                record["STT"] = index + 1
-
-
-                # =====================================
-                # LƯU
-                # =====================================
+                record["STT"] = (
+                    file_index + 1
+                )
 
                 st.session_state.documents.append(
                     record
                 )
-
 
             except Exception as e:
 
@@ -574,15 +1276,15 @@ if uploaded_files:
 
                 st.exception(e)
 
-
             progress.progress(
-                (index + 1) / total
+                (file_index + 1)
+                / total_files
             )
 
-
         status_box.success(
-            f"✅ Đã xử lý xong {len(st.session_state.documents)} "
-            f"/ {total} chứng từ."
+            f"✅ Đã xử lý xong "
+            f"{len(st.session_state.documents)}"
+            f"/{total_files} chứng từ."
         )
 
 
@@ -599,14 +1301,9 @@ if st.session_state.documents:
     )
 
     st.info(
-        "Mỗi chứng từ = 1 dòng dữ liệu. "
-        "Hãy kiểm tra dữ liệu và ảnh gốc trước khi xuất Excel."
+        "⚠️ Dữ liệu OCR chỉ là dữ liệu trích xuất ban đầu. "
+        "Chứng từ cần được kiểm tra trước khi xác nhận."
     )
-
-
-    # =====================================================
-    # BẢNG TỔNG QUAN
-    # =====================================================
 
     table_data = []
 
@@ -632,7 +1329,10 @@ if st.session_state.documents:
             "Người bán":
                 document["Người bán"],
 
-            "Tiền VAT":
+            "Tiền hàng":
+                document["Tiền hàng"],
+
+            "VAT":
                 document["Tiền VAT"],
 
             "Tổng tiền":
@@ -643,8 +1343,9 @@ if st.session_state.documents:
 
         })
 
-
-    df = pd.DataFrame(table_data)
+    df = pd.DataFrame(
+        table_data
+    )
 
     st.dataframe(
         df,
@@ -663,12 +1364,13 @@ if st.session_state.documents:
         "3️⃣ KIỂM TRA TỪNG CHỨNG TỪ"
     )
 
-
     for index, document in enumerate(
         st.session_state.documents
     ):
 
-        with st.container(border=True):
+        with st.container(
+            border=True
+        ):
 
             col1, col2, col3 = st.columns(
                 [0.6, 5, 2]
@@ -687,29 +1389,57 @@ if st.session_state.documents:
                 )
 
                 st.write(
-                    f"Ngày: "
-                    f"{document['Ngày chứng từ'] or '❓ Chưa đọc được'}"
+                    "Ngày: "
+                    + (
+                        document["Ngày chứng từ"]
+                        or "❓ Chưa đọc được"
+                    )
                 )
 
                 st.write(
-                    f"MST: "
-                    f"{document['Mã số thuế'] or '❓ Chưa đọc được'}"
+                    "MST: "
+                    + (
+                        document["Mã số thuế"]
+                        or "❓ Chưa đọc được"
+                    )
                 )
 
                 st.write(
-                    f"Tổng tiền: "
-                    f"{document['Tổng tiền'] or '❓ Chưa đọc được'}"
+                    "Tổng tiền: "
+                    + (
+                        document["Tổng tiền"]
+                        or "❓ Chưa đọc được"
+                    )
                 )
 
             with col3:
 
                 if st.button(
-                    "👁️ XEM CHỨNG TỪ GỐC",
+                    "👁️ XEM CHỨNG TỪ",
                     key=f"view_{index}",
                     use_container_width=True
                 ):
 
                     st.session_state.selected_document = index
+
+            # =========================================
+            # CẢNH BÁO
+            # =========================================
+
+            if document["Cảnh báo"]:
+
+                st.warning(
+                    "⚠️ "
+                    + " | ".join(
+                        document["Cảnh báo"]
+                    )
+                )
+
+            else:
+
+                st.success(
+                    "🟢 Chưa phát hiện lỗi logic cơ bản."
+                )
 
             # =========================================
             # CHỈNH SỬA
@@ -719,7 +1449,9 @@ if st.session_state.documents:
                 "✏️ Kiểm tra / chỉnh sửa dữ liệu"
             ):
 
-                col_a, col_b = st.columns(2)
+                col_a, col_b = st.columns(
+                    2
+                )
 
                 with col_a:
 
@@ -779,44 +1511,97 @@ if st.session_state.documents:
                     key=f"content_{index}"
                 )
 
+                if st.button(
+                    "🔎 KIỂM TRA LẠI SỐ LIỆU",
+                    key=f"validate_{index}",
+                    use_container_width=True
+                ):
+
+                    status, warnings = validate_record(
+                        document
+                    )
+
+                    document["Cảnh báo"] = warnings
+
+                    if warnings:
+
+                        document["Trạng thái"] = status
+
+                        st.warning(
+                            " | ".join(
+                                warnings
+                            )
+                        )
+
+                    else:
+
+                        document["Trạng thái"] = (
+                            "🟢 Có vẻ hợp lệ"
+                        )
+
+                        st.success(
+                            "✅ Dữ liệu vượt qua kiểm tra logic cơ bản."
+                        )
+
                 document["Trạng thái"] = st.selectbox(
                     "Trạng thái kiểm tra",
                     [
                         "⚠️ Chưa kiểm tra",
+                        "🟢 Có vẻ hợp lệ",
                         "✅ Đã kiểm tra",
                         "❌ Có sai lệch"
                     ],
-                    key=f"status_{index}"
+                    key=f"status_{index}",
+                    index=[
+                        "⚠️ Chưa kiểm tra",
+                        "🟢 Có vẻ hợp lệ",
+                        "✅ Đã kiểm tra",
+                        "❌ Có sai lệch"
+                    ].index(
+                        document["Trạng thái"]
+                    )
+                    if document["Trạng thái"]
+                    in [
+                        "⚠️ Chưa kiểm tra",
+                        "🟢 Có vẻ hợp lệ",
+                        "✅ Đã kiểm tra",
+                        "❌ Có sai lệch"
+                    ]
+                    else 0
                 )
 
 
 # =========================================================
-# 4. XEM ẢNH GỐC + OCR
+# 4. XEM CHỨNG TỪ
 # =========================================================
 
 if st.session_state.selected_document is not None:
 
-    selected = st.session_state.selected_document
+    selected = (
+        st.session_state.selected_document
+    )
 
     if selected < len(
         st.session_state.documents
     ):
 
-        document = st.session_state.documents[selected]
+        document = (
+            st.session_state.documents[selected]
+        )
 
         st.markdown("---")
 
         st.subheader(
-            f"👁️ KIỂM TRA: {document['Tên file']}"
+            f"👁️ KIỂM TRA: "
+            f"{document['Tên file']}"
         )
 
         col_image, col_data = st.columns(
             [1.2, 1]
         )
 
-
         # =============================================
-        # ẢNH GỐC
+        # ẢNH
         # =============================================
 
         with col_image:
@@ -825,7 +1610,7 @@ if st.session_state.selected_document is not None:
                 "### 📷 CHỨNG TỪ GỐC"
             )
 
-            if document["_preview_image"] is not None:
+            if document["_preview_image"]:
 
                 st.image(
                     document["_preview_image"],
@@ -838,9 +1623,8 @@ if st.session_state.selected_document is not None:
                     "Không có ảnh xem trước."
                 )
 
-
         # =============================================
-        # DỮ LIỆU
+        # DATA
         # =============================================
 
         with col_data:
@@ -849,46 +1633,75 @@ if st.session_state.selected_document is not None:
                 "### 📝 DỮ LIỆU ĐÃ ĐỌC"
             )
 
-            st.write(
-                f"**Ngày:** "
-                f"{document['Ngày chứng từ']}"
-            )
+            fields = [
 
-            st.write(
-                f"**Số chứng từ:** "
-                f"{document['Số chứng từ']}"
-            )
+                ("Ngày",
+                 "Ngày chứng từ"),
 
-            st.write(
-                f"**MST:** "
-                f"{document['Mã số thuế']}"
-            )
+                ("Số chứng từ",
+                 "Số chứng từ"),
 
-            st.write(
-                f"**Người bán:** "
-                f"{document['Người bán']}"
-            )
+                ("MST",
+                 "Mã số thuế"),
 
-            st.write(
-                f"**Tiền hàng:** "
-                f"{document['Tiền hàng']}"
-            )
+                ("Người bán",
+                 "Người bán"),
 
-            st.write(
-                f"**VAT:** "
-                f"{document['Tiền VAT']}"
-            )
+                ("Tiền hàng",
+                 "Tiền hàng"),
 
-            st.write(
-                f"**Tổng tiền:** "
-                f"{document['Tổng tiền']}"
-            )
+                ("Thuế suất",
+                 "Thuế suất VAT"),
+
+                ("Tiền VAT",
+                 "Tiền VAT"),
+
+                ("Tổng tiền",
+                 "Tổng tiền"),
+
+                ("Nội dung",
+                 "Nội dung")
+
+            ]
+
+            for label, key in fields:
+
+                value = document[key]
+
+                if value:
+
+                    st.write(
+                        f"**{label}:** {value}"
+                    )
+
+                else:
+
+                    st.warning(
+                        f"⚠️ {label}: chưa đọc được"
+                    )
 
             st.write(
                 f"**Trạng thái:** "
                 f"{document['Trạng thái']}"
             )
 
+        # =============================================
+        # CẢNH BÁO
+        # =============================================
+
+        if document["Cảnh báo"]:
+
+            st.markdown("---")
+
+            st.warning(
+                "⚠️ CÁC VẤN ĐỀ PHÁT HIỆN"
+            )
+
+            for warning in document["Cảnh báo"]:
+
+                st.write(
+                    f"• {warning}"
+                )
 
         # =============================================
         # OCR THÔ
@@ -903,21 +1716,20 @@ if st.session_state.selected_document is not None:
         if document["_raw_text"]:
 
             st.text_area(
-                "Kết quả OCR",
+                "OCR",
                 document["_raw_text"],
-                height=350,
+                height=450,
                 key=f"ocr_text_{selected}"
             )
 
         else:
 
             st.error(
-                "❌ OCR không đọc được chữ từ chứng từ này."
+                "❌ Không đọc được nội dung."
             )
 
-
         if st.button(
-            "❌ Đóng chứng từ",
+            "❌ ĐÓNG CHỨNG TỪ",
             key="close_document",
             use_container_width=True
         ):
@@ -947,28 +1759,24 @@ if st.session_state.documents:
         in st.session_state.documents
 
         if document["Trạng thái"]
-        != "✅ Đã kiểm tra"
+        not in [
+            "✅ Đã kiểm tra"
+        ]
 
     ]
-
 
     if unchecked:
 
         st.warning(
             f"⚠️ Còn {len(unchecked)} chứng từ "
-            "chưa được xác nhận."
+            "chưa được xác nhận chính thức."
         )
 
     else:
 
         st.success(
-            "✅ Tất cả chứng từ đã được kiểm tra."
+            "✅ Tất cả chứng từ đã được xác nhận."
         )
-
-
-    # =====================================================
-    # DỮ LIỆU EXCEL
-    # =====================================================
 
     export_data = []
 
@@ -1010,15 +1818,18 @@ if st.session_state.documents:
                 document["Nội dung"],
 
             "Trạng thái":
-                document["Trạng thái"]
+                document["Trạng thái"],
+
+            "Cảnh báo":
+                " | ".join(
+                    document["Cảnh báo"]
+                )
 
         })
-
 
     df_export = pd.DataFrame(
         export_data
     )
-
 
     st.dataframe(
         df_export,
@@ -1052,9 +1863,7 @@ if st.session_state.documents:
             sheet_name="Chung_tu"
         )
 
-
     excel_data = output.getvalue()
-
 
     st.download_button(
 
@@ -1074,7 +1883,7 @@ if st.session_state.documents:
 
 
 # =========================================================
-# 7. XÓA DỮ LIỆU
+# 7. XÓA
 # =========================================================
 
 if st.session_state.documents:
