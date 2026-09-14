@@ -1,1 +1,7 @@
-
+streamlit
+easyocr
+Pillow
+PyMuPDF
+numpy
+pandas
+openpyxl
