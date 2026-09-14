@@ -3,13 +3,14 @@ import pandas as pd
 import easyocr
 import io
 import re
+import numpy as np
 import fitz
 
 from PIL import Image
 
 
 # =========================================================
-# CẤU HÌNH TRANG
+# CẤU HÌNH
 # =========================================================
 
 st.set_page_config(
@@ -21,26 +22,23 @@ st.set_page_config(
 st.title("📄 QUẢN LÝ CHỨNG TỪ")
 
 st.write(
-    "Tải lên nhiều chứng từ gốc → đọc dữ liệu → kiểm tra → xuất Excel."
+    "Tải chứng từ gốc → đọc OCR → kiểm tra dữ liệu → xuất Excel"
 )
 
 
 # =========================================================
-# KHỞI TẠO SESSION STATE
+# SESSION STATE
 # =========================================================
 
 if "documents" not in st.session_state:
     st.session_state.documents = []
-
-if "ocr_reader" not in st.session_state:
-    st.session_state.ocr_reader = None
 
 if "selected_document" not in st.session_state:
     st.session_state.selected_document = None
 
 
 # =========================================================
-# HÀM KHỞI TẠO OCR
+# KHỞI TẠO OCR
 # =========================================================
 
 @st.cache_resource
@@ -48,14 +46,15 @@ def load_ocr():
 
     reader = easyocr.Reader(
         ["vi", "en"],
-        gpu=False
+        gpu=False,
+        verbose=False
     )
 
     return reader
 
 
 # =========================================================
-# HÀM CHUYỂN FILE PDF THÀNH ẢNH
+# PDF -> ẢNH
 # =========================================================
 
 def pdf_to_images(file_bytes):
@@ -70,16 +69,17 @@ def pdf_to_images(file_bytes):
     for page in pdf:
 
         pix = page.get_pixmap(
-            matrix=fitz.Matrix(2, 2)
+            matrix=fitz.Matrix(2, 2),
+            alpha=False
         )
 
-        img = Image.frombytes(
+        image = Image.frombytes(
             "RGB",
             [pix.width, pix.height],
             pix.samples
         )
 
-        images.append(img)
+        images.append(image)
 
     pdf.close()
 
@@ -87,29 +87,43 @@ def pdf_to_images(file_bytes):
 
 
 # =========================================================
-# HÀM ĐỌC ẢNH
+# OCR ẢNH
 # =========================================================
 
-def read_image_ocr(reader, image):
+def read_image(reader, image):
+
+    # PIL Image -> NumPy
+    image_array = np.array(image)
 
     result = reader.readtext(
-        image,
-        detail=0,
-        paragraph=True
+        image_array,
+        detail=1,
+        paragraph=False
     )
 
-    return "\n".join(result)
+    lines = []
+
+    for item in result:
+
+        if len(item) >= 2:
+
+            text = str(item[1]).strip()
+
+            if text:
+                lines.append(text)
+
+    return "\n".join(lines)
 
 
 # =========================================================
-# HÀM LẤY NGÀY
+# TÌM NGÀY
 # =========================================================
 
 def extract_date(text):
 
     patterns = [
 
-        r"(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b",
 
         r"Ngày\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
 
@@ -136,7 +150,7 @@ def extract_date(text):
 
 
 # =========================================================
-# HÀM LẤY MÃ SỐ THUẾ
+# TÌM MST
 # =========================================================
 
 def extract_tax_code(text):
@@ -166,7 +180,7 @@ def extract_tax_code(text):
 
 
 # =========================================================
-# HÀM LẤY SỐ CHỨNG TỪ / SỐ HÓA ĐƠN
+# TÌM SỐ CHỨNG TỪ / SỐ HÓA ĐƠN
 # =========================================================
 
 def extract_document_number(text):
@@ -196,7 +210,7 @@ def extract_document_number(text):
 
 
 # =========================================================
-# HÀM LẤY TỔNG TIỀN
+# TÌM TỔNG TIỀN
 # =========================================================
 
 def extract_total(text):
@@ -204,6 +218,8 @@ def extract_total(text):
     patterns = [
 
         r"Tổng tiền thanh toán\s*[:\-]?\s*([\d\.,]+)",
+
+        r"Tổng cộng tiền thanh toán\s*[:\-]?\s*([\d\.,]+)",
 
         r"Tổng cộng\s*[:\-]?\s*([\d\.,]+)",
 
@@ -226,7 +242,7 @@ def extract_total(text):
 
 
 # =========================================================
-# HÀM LẤY TIỀN THUẾ VAT
+# TÌM VAT
 # =========================================================
 
 def extract_vat(text):
@@ -256,7 +272,7 @@ def extract_vat(text):
 
 
 # =========================================================
-# HÀM LẤY TÊN NGƯỜI BÁN
+# TÌM NGƯỜI BÁN
 # =========================================================
 
 def extract_seller(text):
@@ -272,6 +288,7 @@ def extract_seller(text):
             or "NGƯỜI BÁN" in clean
         ):
 
+            # Lấy dòng tiếp theo
             if i + 1 < len(lines):
 
                 next_line = lines[i + 1].strip()
@@ -283,10 +300,10 @@ def extract_seller(text):
 
 
 # =========================================================
-# HÀM TẠO DÒNG DỮ LIỆU
+# TẠO DỮ LIỆU CHỨNG TỪ
 # =========================================================
 
-def create_document_record(
+def create_record(
     file_name,
     file_type,
     raw_text,
@@ -294,7 +311,9 @@ def create_document_record(
     preview_image
 ):
 
-    record = {
+    return {
+
+        "STT": 0,
 
         "Tên file": file_name,
 
@@ -312,37 +331,34 @@ def create_document_record(
         "Người bán":
             extract_seller(raw_text),
 
-        "Tiền hàng":
-            "",
+        "Tiền hàng": "",
 
-        "VAT":
+        "Thuế suất VAT": "",
+
+        "Tiền VAT":
             extract_vat(raw_text),
 
         "Tổng tiền":
             extract_total(raw_text),
 
-        "Nội dung":
-            "",
+        "Nội dung": "",
 
         "Trạng thái":
-            "⚠️ Cần kiểm tra",
+            "⚠️ Chưa kiểm tra",
+
+        "_raw_text":
+            raw_text,
 
         "_file_bytes":
             file_bytes,
 
         "_preview_image":
-            preview_image,
-
-        "_raw_text":
-            raw_text
-
+            preview_image
     }
-
-    return record
 
 
 # =========================================================
-# PHẦN 1 - TẢI CHỨNG TỪ
+# 1. TẢI CHỨNG TỪ
 # =========================================================
 
 st.markdown("---")
@@ -371,19 +387,19 @@ uploaded_files = st.file_uploader(
 if uploaded_files:
 
     st.success(
-        f"Đã nhận {len(uploaded_files)} chứng từ."
+        f"📁 Đã chọn {len(uploaded_files)} chứng từ."
     )
 
     for file in uploaded_files:
 
         st.write(
-            f"📄 {file.name} — "
-            f"{round(file.size / 1024, 1)} KB"
+            f"📄 **{file.name}** "
+            f"— {round(file.size / 1024, 1)} KB"
         )
 
 
 # =========================================================
-# NÚT ĐỌC TẤT CẢ CHỨNG TỪ
+# 2. ĐỌC CHỨNG TỪ
 # =========================================================
 
 if uploaded_files:
@@ -391,38 +407,73 @@ if uploaded_files:
     st.markdown("---")
 
     if st.button(
-        "🔍 ĐỌC & GHI DỮ LIỆU TẤT CẢ CHỨNG TỪ",
+        "🔍 ĐỌC & GHI DỮ LIỆU CHỨNG TỪ",
+        type="primary",
         use_container_width=True
     ):
 
-        with st.spinner(
-            "Đang khởi động hệ thống OCR..."
-        ):
-
-            reader = load_ocr()
-
+        # Xóa kết quả cũ
         st.session_state.documents = []
+
+        # ---------------------------------------------
+        # KHỞI ĐỘNG OCR
+        # ---------------------------------------------
+
+        try:
+
+            with st.spinner(
+                "⏳ Đang khởi động hệ thống OCR..."
+            ):
+
+                reader = load_ocr()
+
+        except Exception as e:
+
+            st.error(
+                "❌ Không thể khởi động OCR."
+            )
+
+            st.exception(e)
+
+            st.stop()
+
+
+        # ---------------------------------------------
+        # TIẾN TRÌNH
+        # ---------------------------------------------
 
         progress = st.progress(0)
 
-        total_files = len(uploaded_files)
+        status_box = st.empty()
+
+        total = len(uploaded_files)
+
+
+        # ---------------------------------------------
+        # ĐỌC TỪNG FILE
+        # ---------------------------------------------
 
         for index, uploaded_file in enumerate(
             uploaded_files
         ):
 
+            file_name = uploaded_file.name
+
+            status_box.info(
+                f"🔍 Đang đọc "
+                f"{index + 1}/{total}: {file_name}"
+            )
+
             try:
 
                 file_bytes = uploaded_file.getvalue()
 
-                file_name = uploaded_file.name
-
                 file_type = uploaded_file.type
 
 
-                # -----------------------------------------
-                # XỬ LÝ ẢNH
-                # -----------------------------------------
+                # =====================================
+                # ẢNH
+                # =====================================
 
                 if file_type.startswith("image/"):
 
@@ -430,7 +481,7 @@ if uploaded_files:
                         io.BytesIO(file_bytes)
                     ).convert("RGB")
 
-                    raw_text = read_image_ocr(
+                    raw_text = read_image(
                         reader,
                         image
                     )
@@ -438,9 +489,9 @@ if uploaded_files:
                     preview_image = image
 
 
-                # -----------------------------------------
-                # XỬ LÝ PDF
-                # -----------------------------------------
+                # =====================================
+                # PDF
+                # =====================================
 
                 elif file_type == "application/pdf":
 
@@ -450,22 +501,33 @@ if uploaded_files:
 
                     all_text = []
 
-                    for image in images:
+                    for page_number, image in enumerate(
+                        images
+                    ):
 
-                        page_text = read_image_ocr(
+                        page_text = read_image(
                             reader,
                             image
                         )
 
-                        all_text.append(
-                            page_text
-                        )
+                        if page_text:
+
+                            all_text.append(
+                                f"--- Trang {page_number + 1} ---\n"
+                                f"{page_text}"
+                            )
 
                     raw_text = "\n\n".join(
                         all_text
                     )
 
-                    preview_image = images[0]
+                    if images:
+
+                        preview_image = images[0]
+
+                    else:
+
+                        preview_image = None
 
 
                 else:
@@ -475,11 +537,11 @@ if uploaded_files:
                     preview_image = None
 
 
-                # -----------------------------------------
-                # TẠO DÒNG DỮ LIỆU
-                # -----------------------------------------
+                # =====================================
+                # TẠO RECORD
+                # =====================================
 
-                record = create_document_record(
+                record = create_record(
 
                     file_name,
 
@@ -490,8 +552,14 @@ if uploaded_files:
                     file_bytes,
 
                     preview_image
-
                 )
+
+                record["STT"] = index + 1
+
+
+                # =====================================
+                # LƯU
+                # =====================================
 
                 st.session_state.documents.append(
                     record
@@ -501,24 +569,25 @@ if uploaded_files:
             except Exception as e:
 
                 st.error(
-                    f"Lỗi khi đọc {uploaded_file.name}: {e}"
+                    f"❌ Lỗi khi đọc {file_name}"
                 )
+
+                st.exception(e)
 
 
             progress.progress(
-                (index + 1) / total_files
+                (index + 1) / total
             )
 
 
-        st.success(
-            f"✅ Đã đọc xong {len(st.session_state.documents)} chứng từ."
+        status_box.success(
+            f"✅ Đã xử lý xong {len(st.session_state.documents)} "
+            f"/ {total} chứng từ."
         )
-
-        st.rerun()
 
 
 # =========================================================
-# PHẦN 2 - DỮ LIỆU ĐÃ ĐỌC
+# 3. KẾT QUẢ
 # =========================================================
 
 if st.session_state.documents:
@@ -526,288 +595,48 @@ if st.session_state.documents:
     st.markdown("---")
 
     st.subheader(
-        "2️⃣ DỮ LIỆU CHỨNG TỪ ĐÃ ĐỌC"
+        "2️⃣ DỮ LIỆU CHỨNG TỪ"
     )
 
     st.info(
-        "Mỗi chứng từ tương ứng với một dòng. "
-        "Bạn có thể xem ảnh gốc trước khi xuất Excel."
+        "Mỗi chứng từ = 1 dòng dữ liệu. "
+        "Hãy kiểm tra dữ liệu và ảnh gốc trước khi xuất Excel."
     )
 
 
     # =====================================================
-    # HIỂN THỊ TỪNG DÒNG
+    # BẢNG TỔNG QUAN
     # =====================================================
 
-    for index, document in enumerate(
-        st.session_state.documents
-    ):
+    table_data = []
 
-        with st.container(border=True):
+    for document in st.session_state.documents:
 
-            col1, col2, col3, col4 = st.columns(
-                [0.5, 3, 2, 1.5]
-            )
-
-            with col1:
-
-                st.write(
-                    f"**{index + 1}**"
-                )
-
-            with col2:
-
-                st.write(
-                    f"📄 **{document['Tên file']}**"
-                )
-
-            with col3:
-
-                st.write(
-                    f"Ngày: {document['Ngày chứng từ'] or 'Chưa đọc được'}"
-                )
-
-                st.write(
-                    f"MST: {document['Mã số thuế'] or 'Chưa đọc được'}"
-                )
-
-            with col4:
-
-                if st.button(
-                    "👁️ Xem ảnh",
-                    key=f"view_{index}",
-                    use_container_width=True
-                ):
-
-                    st.session_state.selected_document = index
-
-
-            # =================================================
-            # KHU VỰC SỬA DỮ LIỆU
-            # =================================================
-
-            with st.expander(
-                "✏️ Kiểm tra / chỉnh sửa dữ liệu"
-            ):
-
-                c1, c2 = st.columns(2)
-
-                with c1:
-
-                    document["Ngày chứng từ"] = st.text_input(
-                        "Ngày chứng từ",
-                        value=document["Ngày chứng từ"],
-                        key=f"date_{index}"
-                    )
-
-                    document["Số chứng từ"] = st.text_input(
-                        "Số chứng từ",
-                        value=document["Số chứng từ"],
-                        key=f"number_{index}"
-                    )
-
-                    document["Mã số thuế"] = st.text_input(
-                        "Mã số thuế",
-                        value=document["Mã số thuế"],
-                        key=f"tax_{index}"
-                    )
-
-                    document["Người bán"] = st.text_input(
-                        "Người bán",
-                        value=document["Người bán"],
-                        key=f"seller_{index}"
-                    )
-
-                with c2:
-
-                    document["Tiền hàng"] = st.text_input(
-                        "Tiền hàng",
-                        value=document["Tiền hàng"],
-                        key=f"amount_{index}"
-                    )
-
-                    document["VAT"] = st.text_input(
-                        "VAT",
-                        value=document["VAT"],
-                        key=f"vat_{index}"
-                    )
-
-                    document["Tổng tiền"] = st.text_input(
-                        "Tổng tiền",
-                        value=document["Tổng tiền"],
-                        key=f"total_{index}"
-                    )
-
-                    document["Nội dung"] = st.text_input(
-                        "Nội dung",
-                        value=document["Nội dung"],
-                        key=f"content_{index}"
-                    )
-
-
-                document["Trạng thái"] = st.selectbox(
-                    "Trạng thái kiểm tra",
-                    [
-                        "⚠️ Cần kiểm tra",
-                        "✅ Đã kiểm tra",
-                        "❌ Có sai lệch"
-                    ],
-                    index=[
-                        "⚠️ Cần kiểm tra",
-                        "✅ Đã kiểm tra",
-                        "❌ Có sai lệch"
-                    ].index(
-                        document["Trạng thái"]
-                    ),
-                    key=f"status_{index}"
-                )
-
-
-# =========================================================
-# PHẦN 3 - XEM ẢNH CHỨNG TỪ GỐC
-# =========================================================
-
-if (
-    st.session_state.selected_document is not None
-    and
-    st.session_state.selected_document
-    <
-    len(st.session_state.documents)
-):
-
-    index = st.session_state.selected_document
-
-    document = st.session_state.documents[index]
-
-    st.markdown("---")
-
-    st.subheader(
-        f"👁️ KIỂM TRA CHỨNG TỪ: {document['Tên file']}"
-    )
-
-    col_image, col_text = st.columns(
-        [1.2, 1]
-    )
-
-    with col_image:
-
-        st.markdown("### 📷 Chứng từ gốc")
-
-        if document["_preview_image"] is not None:
-
-            st.image(
-                document["_preview_image"],
-                use_container_width=True
-            )
-
-
-    with col_text:
-
-        st.markdown("### 📝 Dữ liệu hệ thống đọc được")
-
-        st.write(
-            f"**Ngày:** {document['Ngày chứng từ']}"
-        )
-
-        st.write(
-            f"**Số chứng từ:** {document['Số chứng từ']}"
-        )
-
-        st.write(
-            f"**Mã số thuế:** {document['Mã số thuế']}"
-        )
-
-        st.write(
-            f"**Người bán:** {document['Người bán']}"
-        )
-
-        st.write(
-            f"**Tiền hàng:** {document['Tiền hàng']}"
-        )
-
-        st.write(
-            f"**VAT:** {document['VAT']}"
-        )
-
-        st.write(
-            f"**Tổng tiền:** {document['Tổng tiền']}"
-        )
-
-        st.write(
-            f"**Nội dung:** {document['Nội dung']}"
-        )
-
-        st.markdown("---")
-
-        st.markdown("### 🔍 OCR thô")
-
-        st.text_area(
-            "Nội dung OCR",
-            document["_raw_text"],
-            height=250,
-            key=f"raw_{index}"
-        )
-
-
-    if st.button(
-        "❌ Đóng xem chứng từ",
-        key="close_document"
-    ):
-
-        st.session_state.selected_document = None
-
-        st.rerun()
-
-
-# =========================================================
-# PHẦN 4 - KIỂM TRA TRƯỚC KHI XUẤT
-# =========================================================
-
-if st.session_state.documents:
-
-    st.markdown("---")
-
-    st.subheader(
-        "3️⃣ KIỂM TRA TRƯỚC KHI XUẤT EXCEL"
-    )
-
-    export_data = []
-
-    for index, document in enumerate(
-        st.session_state.documents
-    ):
-
-        export_data.append({
+        table_data.append({
 
             "STT":
-                index + 1,
+                document["STT"],
 
             "Tên file":
                 document["Tên file"],
 
-            "Ngày chứng từ":
+            "Ngày":
                 document["Ngày chứng từ"],
 
-            "Số chứng từ":
+            "Số CT":
                 document["Số chứng từ"],
 
-            "Mã số thuế":
+            "MST":
                 document["Mã số thuế"],
 
             "Người bán":
                 document["Người bán"],
 
-            "Tiền hàng":
-                document["Tiền hàng"],
-
-            "VAT":
-                document["VAT"],
+            "Tiền VAT":
+                document["Tiền VAT"],
 
             "Tổng tiền":
                 document["Tổng tiền"],
-
-            "Nội dung":
-                document["Nội dung"],
 
             "Trạng thái":
                 document["Trạng thái"]
@@ -815,8 +644,7 @@ if st.session_state.documents:
         })
 
 
-    df = pd.DataFrame(export_data)
-
+    df = pd.DataFrame(table_data)
 
     st.dataframe(
         df,
@@ -826,23 +654,309 @@ if st.session_state.documents:
 
 
     # =====================================================
-    # KIỂM TRA ĐÃ DUYỆT HẾT CHƯA
+    # TỪNG CHỨNG TỪ
     # =====================================================
 
-    not_checked = [
+    st.markdown("---")
 
-        d for d in st.session_state.documents
+    st.subheader(
+        "3️⃣ KIỂM TRA TỪNG CHỨNG TỪ"
+    )
 
-        if d["Trạng thái"] != "✅ Đã kiểm tra"
+
+    for index, document in enumerate(
+        st.session_state.documents
+    ):
+
+        with st.container(border=True):
+
+            col1, col2, col3 = st.columns(
+                [0.6, 5, 2]
+            )
+
+            with col1:
+
+                st.markdown(
+                    f"### {document['STT']}"
+                )
+
+            with col2:
+
+                st.markdown(
+                    f"**📄 {document['Tên file']}**"
+                )
+
+                st.write(
+                    f"Ngày: "
+                    f"{document['Ngày chứng từ'] or '❓ Chưa đọc được'}"
+                )
+
+                st.write(
+                    f"MST: "
+                    f"{document['Mã số thuế'] or '❓ Chưa đọc được'}"
+                )
+
+                st.write(
+                    f"Tổng tiền: "
+                    f"{document['Tổng tiền'] or '❓ Chưa đọc được'}"
+                )
+
+            with col3:
+
+                if st.button(
+                    "👁️ XEM CHỨNG TỪ GỐC",
+                    key=f"view_{index}",
+                    use_container_width=True
+                ):
+
+                    st.session_state.selected_document = index
+
+            # =========================================
+            # CHỈNH SỬA
+            # =========================================
+
+            with st.expander(
+                "✏️ Kiểm tra / chỉnh sửa dữ liệu"
+            ):
+
+                col_a, col_b = st.columns(2)
+
+                with col_a:
+
+                    document["Ngày chứng từ"] = st.text_input(
+                        "Ngày chứng từ",
+                        document["Ngày chứng từ"],
+                        key=f"date_{index}"
+                    )
+
+                    document["Số chứng từ"] = st.text_input(
+                        "Số chứng từ",
+                        document["Số chứng từ"],
+                        key=f"number_{index}"
+                    )
+
+                    document["Mã số thuế"] = st.text_input(
+                        "Mã số thuế",
+                        document["Mã số thuế"],
+                        key=f"tax_{index}"
+                    )
+
+                    document["Người bán"] = st.text_input(
+                        "Người bán",
+                        document["Người bán"],
+                        key=f"seller_{index}"
+                    )
+
+                with col_b:
+
+                    document["Tiền hàng"] = st.text_input(
+                        "Tiền hàng",
+                        document["Tiền hàng"],
+                        key=f"amount_{index}"
+                    )
+
+                    document["Thuế suất VAT"] = st.text_input(
+                        "Thuế suất VAT",
+                        document["Thuế suất VAT"],
+                        key=f"rate_{index}"
+                    )
+
+                    document["Tiền VAT"] = st.text_input(
+                        "Tiền VAT",
+                        document["Tiền VAT"],
+                        key=f"vat_{index}"
+                    )
+
+                    document["Tổng tiền"] = st.text_input(
+                        "Tổng tiền",
+                        document["Tổng tiền"],
+                        key=f"total_{index}"
+                    )
+
+                document["Nội dung"] = st.text_input(
+                    "Nội dung chứng từ",
+                    document["Nội dung"],
+                    key=f"content_{index}"
+                )
+
+                document["Trạng thái"] = st.selectbox(
+                    "Trạng thái kiểm tra",
+                    [
+                        "⚠️ Chưa kiểm tra",
+                        "✅ Đã kiểm tra",
+                        "❌ Có sai lệch"
+                    ],
+                    key=f"status_{index}"
+                )
+
+
+# =========================================================
+# 4. XEM ẢNH GỐC + OCR
+# =========================================================
+
+if st.session_state.selected_document is not None:
+
+    selected = st.session_state.selected_document
+
+    if selected < len(
+        st.session_state.documents
+    ):
+
+        document = st.session_state.documents[selected]
+
+        st.markdown("---")
+
+        st.subheader(
+            f"👁️ KIỂM TRA: {document['Tên file']}"
+        )
+
+        col_image, col_data = st.columns(
+            [1.2, 1]
+        )
+
+
+        # =============================================
+        # ẢNH GỐC
+        # =============================================
+
+        with col_image:
+
+            st.markdown(
+                "### 📷 CHỨNG TỪ GỐC"
+            )
+
+            if document["_preview_image"] is not None:
+
+                st.image(
+                    document["_preview_image"],
+                    use_container_width=True
+                )
+
+            else:
+
+                st.warning(
+                    "Không có ảnh xem trước."
+                )
+
+
+        # =============================================
+        # DỮ LIỆU
+        # =============================================
+
+        with col_data:
+
+            st.markdown(
+                "### 📝 DỮ LIỆU ĐÃ ĐỌC"
+            )
+
+            st.write(
+                f"**Ngày:** "
+                f"{document['Ngày chứng từ']}"
+            )
+
+            st.write(
+                f"**Số chứng từ:** "
+                f"{document['Số chứng từ']}"
+            )
+
+            st.write(
+                f"**MST:** "
+                f"{document['Mã số thuế']}"
+            )
+
+            st.write(
+                f"**Người bán:** "
+                f"{document['Người bán']}"
+            )
+
+            st.write(
+                f"**Tiền hàng:** "
+                f"{document['Tiền hàng']}"
+            )
+
+            st.write(
+                f"**VAT:** "
+                f"{document['Tiền VAT']}"
+            )
+
+            st.write(
+                f"**Tổng tiền:** "
+                f"{document['Tổng tiền']}"
+            )
+
+            st.write(
+                f"**Trạng thái:** "
+                f"{document['Trạng thái']}"
+            )
+
+
+        # =============================================
+        # OCR THÔ
+        # =============================================
+
+        st.markdown("---")
+
+        st.markdown(
+            "### 🔍 TOÀN BỘ NỘI DUNG OCR"
+        )
+
+        if document["_raw_text"]:
+
+            st.text_area(
+                "Kết quả OCR",
+                document["_raw_text"],
+                height=350,
+                key=f"ocr_text_{selected}"
+            )
+
+        else:
+
+            st.error(
+                "❌ OCR không đọc được chữ từ chứng từ này."
+            )
+
+
+        if st.button(
+            "❌ Đóng chứng từ",
+            key="close_document",
+            use_container_width=True
+        ):
+
+            st.session_state.selected_document = None
+
+            st.rerun()
+
+
+# =========================================================
+# 5. KIỂM TRA TRƯỚC KHI XUẤT
+# =========================================================
+
+if st.session_state.documents:
+
+    st.markdown("---")
+
+    st.subheader(
+        "4️⃣ KIỂM TRA TRƯỚC KHI XUẤT EXCEL"
+    )
+
+    unchecked = [
+
+        document
+
+        for document
+        in st.session_state.documents
+
+        if document["Trạng thái"]
+        != "✅ Đã kiểm tra"
 
     ]
 
 
-    if not_checked:
+    if unchecked:
 
         st.warning(
-            f"⚠️ Còn {len(not_checked)} chứng từ "
-            "chưa được đánh dấu 'Đã kiểm tra'."
+            f"⚠️ Còn {len(unchecked)} chứng từ "
+            "chưa được xác nhận."
         )
 
     else:
@@ -852,35 +966,18 @@ if st.session_state.documents:
         )
 
 
-# =========================================================
-# PHẦN 5 - XUẤT EXCEL
-# =========================================================
-
-if st.session_state.documents:
-
-    st.markdown("---")
-
-    st.subheader(
-        "4️⃣ XUẤT DỮ LIỆU RA EXCEL"
-    )
-
-
-    # -----------------------------------------------------
-    # TẠO FILE EXCEL
-    # -----------------------------------------------------
-
-    output = io.BytesIO()
+    # =====================================================
+    # DỮ LIỆU EXCEL
+    # =====================================================
 
     export_data = []
 
-    for index, document in enumerate(
-        st.session_state.documents
-    ):
+    for document in st.session_state.documents:
 
         export_data.append({
 
             "STT":
-                index + 1,
+                document["STT"],
 
             "Tên file":
                 document["Tên file"],
@@ -900,8 +997,11 @@ if st.session_state.documents:
             "Tiền hàng":
                 document["Tiền hàng"],
 
-            "VAT":
-                document["VAT"],
+            "Thuế suất VAT":
+                document["Thuế suất VAT"],
+
+            "Tiền VAT":
+                document["Tiền VAT"],
 
             "Tổng tiền":
                 document["Tổng tiền"],
@@ -920,6 +1020,27 @@ if st.session_state.documents:
     )
 
 
+    st.dataframe(
+        df_export,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# =========================================================
+# 6. XUẤT EXCEL
+# =========================================================
+
+if st.session_state.documents:
+
+    st.markdown("---")
+
+    st.subheader(
+        "5️⃣ XUẤT EXCEL"
+    )
+
+    output = io.BytesIO()
+
     with pd.ExcelWriter(
         output,
         engine="openpyxl"
@@ -934,10 +1055,6 @@ if st.session_state.documents:
 
     excel_data = output.getvalue()
 
-
-    # -----------------------------------------------------
-    # NÚT DOWNLOAD
-    # -----------------------------------------------------
 
     st.download_button(
 
@@ -957,7 +1074,7 @@ if st.session_state.documents:
 
 
 # =========================================================
-# XÓA TOÀN BỘ DỮ LIỆU
+# 7. XÓA DỮ LIỆU
 # =========================================================
 
 if st.session_state.documents:
